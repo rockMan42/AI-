@@ -1,0 +1,6 @@
+skills_dirs:
+  - "app/hermes/skills" # 技能目录（与旧版一致）
+tools_dirs:
+  - "app/hermes/tools"  # 自定义工具目录
+mcp_servers:
+  - "app/hermes/mcp"  # MCP 服务器配置目录
