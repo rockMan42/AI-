@@ -1,3 +1,5 @@
+import json
+
 import httpx
 from app.config.settings import get_settings
 from app.core.redis_client import get_cache, set_cache
@@ -39,14 +41,23 @@ async def _send_feishu_reply(message_id: str, text: str):
     """回复飞书消息（基于原消息id进行回复）"""
     token = await _get_tenant_access_token()
     async with httpx.AsyncClient() as client:
-        await client.post(
+        resp = await client.post(
             f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/reply",
             headers={"Authorization": f"Bearer {token}"},
             json={
-                "content": f'{{"text": "{text}"}}',
+                "content": json.dumps({"text": text}, ensure_ascii=False),
                 "msg_type": "text",
             },
         )
+
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("code") != 0:
+        raise RuntimeError(
+            f"飞书回复失败: code={data.get('code')}, msg={data.get('msg')}"
+        )
+
+    return data
 
 
 async def _verify_signature(request_token: str, verification_token: str) -> bool:
