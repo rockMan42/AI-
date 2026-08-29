@@ -24,7 +24,15 @@ class Settings(BaseSettings):
     # 百练平台 API KEY
     dashscope_api_key: str  = ""
 
+    # 飞书用户白名单
+    feishu_allowed_users: str = ""
 
+    # 飞书应用凭证
+    feishu_app_id: str = ""
+    feishu_app_secret: str = ""
+    feishu_verification_token: str = ""
+    # encrypt
+    encrypt_key: str = ""
     # 指定了 env_file = ".env"，就不再需要手动 load_dotenv() 了, 启动时自动读取.env配置
     model_config = {
         "env_file":".env",

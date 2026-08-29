@@ -52,3 +52,33 @@ async def check_redis():
     except Exception as e:
         print(f"error:{e}")
         raise e
+
+async def get_cache(key: str) -> str | None:
+    """从缓存中获取数据"""
+    global redis_client
+    if redis_client is None:
+        raise RuntimeError("redis client not initialized")
+
+    try:
+        cache = await redis_client.get(key)
+        return cache
+    except Exception as e:
+        print(f"获取缓存数据失败:{e}")
+        raise e
+
+async def set_cache(key: str, value: str, expire: int = None) -> bool:
+    """设置数据至缓存"""
+    global redis_client
+    if redis_client is None:
+        raise RuntimeError("redis client not initialized")
+
+    try:
+        if expire is not None:
+            await redis_client.set(key,value,ex=expire)
+        else:
+            await redis_client.set(key,value)
+
+        return True
+    except Exception as e:
+        print(f"设置缓存失败:{e}")
+        raise e

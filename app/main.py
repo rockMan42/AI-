@@ -1,13 +1,13 @@
 # FastAPI入口
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from pydantic_settings.sources.providers import aws
 
+from contextlib import asynccontextmanager
+from fastapi import FastAPI,Request
 from app.config.settings import get_settings
 from app.core.database import init_db, close_db
 from app.core.milvus_client import init_milvus, close_milvus
 from app.core.redis_client import init_redis, close_redis
 from app.hermes.agent import init_hermes_agent, shutdown_hermes_agent
+from app.api.v1 import feishu_gateway_webhook
 
 
 @asynccontextmanager
@@ -40,6 +40,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+app.include_router(feishu_gateway_webhook.router, prefix=f"{settings.app_prefix}", tags=["feishu_gateway_webhook"])
 
 @app.get(f"{settings.app_prefix}/health")
 async def check_health():

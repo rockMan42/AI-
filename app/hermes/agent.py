@@ -10,11 +10,15 @@ async def init_hermes_agent(settings: Settings):
     global _agent
 
     try:
-        os.environ["OPENROUTER_API_KEY"] = settings.dashscope_api_key
-
         _agent = AIAgent(
-            model="dashscope/qwen-max",
-            quiet_mode=True
+            provider="alibaba",
+            model="qwen3.6-plus",
+            api_key=settings.dashscope_api_key,
+            base_url=(
+                "https://dashscope.aliyuncs.com/"
+                "compatible-mode/v1"
+            ),
+            quiet_mode=True,
             # skills_dir="app/hermes/skills",
             # tools_dir="app/hermes/tools",
             # mcp_dir="app/hermes/mcp",
