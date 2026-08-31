@@ -12,7 +12,7 @@ async def init_hermes_agent(settings: Settings):
     try:
         _agent = AIAgent(
             provider="alibaba",
-            model="qwen3.6-plus",
+            model="qwen-turbo",
             api_key=settings.dashscope_api_key,
             base_url=(
                 "https://dashscope.aliyuncs.com/"
