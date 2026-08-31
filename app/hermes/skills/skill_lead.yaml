@@ -1,0 +1,29 @@
+name: lead_query
+description: "查询分配给当前用户的客户线索及跟进状态，支持按状态、优先级、时间范围筛选"
+triggers:
+  - "线索"
+  - "客户"
+  - "商机"
+  - "跟进"
+  - "新线索"
+priority: 10
+slots:
+  - name: status
+    type: string
+    required: false
+    description: "线索状态，对应 t_lead.status"
+    enum: ["new", "contacted", "qualified", "proposed", "won", "lost"]
+  - name: priority
+    type: string
+    required: false
+    description: "优先级筛选，对应 t_lead.priority"
+    enum: ["高", "中", "低"]
+  - name: time_range
+    type: string
+    required: false
+    description: "时间范围筛选，用于过滤 t_lead.created_at 或 t_lead.next_followup"
+    enum: ["今天", "本周", "本月", "最近7天"]
+  - name: company_name
+    type: string
+    required: false
+    description: "按客户公司名称模糊搜索，对应 t_lead.company_name"

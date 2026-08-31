@@ -1,0 +1,19 @@
+name: performance_query
+description: "查询员工个人绩效考核结果，包括评分、等级、部门排名及主管评语"
+triggers:
+  - "绩效"
+  - "考核"
+  - "评分"
+  - "KPI"
+  - "评级"
+priority: 10
+slots:
+  - name: period
+    type: string
+    required: true
+    description: "绩效周期，对应 t_performance.period，如 2026-H1、2026-Q1"
+  - name: grade
+    type: string
+    required: false
+    description: "按等级筛选，对应 t_performance.grade"
+    enum: ["S", "A", "B", "C", "D"]

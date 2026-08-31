@@ -3,27 +3,42 @@ import logging
 import json
 from fastapi import Request, APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.config.settings import get_settings
 from app.core.database import get_session
-from app.core.redis_client import redis_client, set_cache, get_cache
+from app.core.redis_client import set_cache, get_cache
 from app.hermes.agent import get_agent
+from app.services.register_skill import SkillRegistry, get_skill_register
 from app.services.user import get_or_create_user
 from app.utils.aes_cipher import AESCipher
 from app.services.feishu import _verify_signature
 from app.services.feishu import _send_feishu_reply
 from app.utils import response
-
+from app.services.intent_router import IntentRouter
 """
 飞书网关webhook
 """
+
+SYSTEM_MESSAGE: str = """你是 AI 数字员工平台的意图分类器。根据用户消息，从以下意图中选择最匹配的一个：
+                            1. requisition_apply - 物资申领（领电脑、办公用品、设备配件等）
+                            2. expense_reimburse - 差旅报销（报销出差费用、提交发票等）
+                            3. attendance_query - 出勤查询（查考勤、打卡记录、工时等）
+                            4. leave_apply - 请假申请（请假、休假、年假、事假等）
+                            5. policy_query - 制度查询（公司制度、报销标准、规章制度等）
+                            6. lead_query - 线索查询（客户线索、商机、销售数据等）
+                            7. performance_query - 绩效查询（考核结果、绩效评分等）
+                            
+                            请你严格以以下 JSON 格式输出，不要有其他内容！！！：
+                            {"intent": "意图编码", "confidence": 0.0~1.0, "extracted_slots": {已提取的槽位}}
+                            
+                            如果无法确定意图，confidence 设为 0。"""
+
 
 log = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter()
 
 @router.post("/webhook/feishu")
-async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session)):
+async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session),register: SkillRegistry = Depends(get_skill_register)):
     """接受飞书事件，处理消息并调用Agent回复"""
 
     # 1. 获取飞书发送的原始 JSON 数据
@@ -89,17 +104,44 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
     # task_id的主要目的是为每次对话或任务提供一个独立的、隔离的运行环境，确保任务之间的数据不相互影响
     # user_id 用于标识发送消息的用户,用户身份标识,会话管理,数据隔离（记忆）,权限控制
     agent = get_agent()
-    result = await asyncio.to_thread(
-        agent.run_conversation,
-        user_message=text,
-        task_id=message_id
-    )
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                agent.run_conversation,
+                user_message=text,
+                system_message=SYSTEM_MESSAGE,
+                task_id=message_id,
+            ),
+            timeout=300,  # 故意设置极短，稳定触发超时
+        )
+    except asyncio.TimeoutError:
+        log.exception("LLM 请求超时")
+        await _send_feishu_reply(message_id, "系统繁忙，请稍后重试")
+        return response.success_response("LLM timeout")
+    except Exception:
+        log.exception("LLM 调用失败")
+        await _send_feishu_reply(message_id, "系统繁忙，请稍后重试")
+        return response.success_response("LLM failed")
 
     reply = result.get("final_response", "")
-    log.info(f"reply:{reply}")
     print(f"reply:{reply}")
 
+    # 具体逻辑
+    intent_router = IntentRouter(register)
+    router_result = intent_router.router(json.loads(reply),user.user_id)
+    action_ = router_result["action"]
+
+    # 根据 action 的值进行不同的处理 如果是 execute_skill 则执行 skill 否则返回消息（针对中等和低等置信度）
+    if action_ == "execute_skill":
+        skill_name = router_result["skill"].name
+        if skill_name == "performance_query" and user.role not in ["admin", "manager"]:
+            reply_text = "该功能仅限主管及以上角色使用"
+        else:
+            reply_text = "执行skill" + "路由到:" + skill_name
+    else:
+        reply_text = router_result["message"]
+
     # 通过飞书 API 发送回复
-    await _send_feishu_reply(message_id,reply)
+    await _send_feishu_reply(message_id,reply_text)
 
     return response.success_response("飞书回复成功")

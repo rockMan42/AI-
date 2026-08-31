@@ -1,7 +1,10 @@
 import os
 
 from run_agent import AIAgent
+
 from app.config.settings import Settings
+from app.services.register_skill import get_skill_register
+
 _agent:AIAgent | None = None
 
 async def init_hermes_agent(settings: Settings):

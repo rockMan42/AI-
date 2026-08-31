@@ -1,0 +1,35 @@
+name: expense_reimburse
+description: "处理差旅报销申请，支持关联出差单、录入费用明细、上传发票，自动匹配报销规则校验限额"
+triggers:
+  - "报销"
+  - "差旅费"
+  - "提交报销"
+  - "报销单"
+  - "发票"
+priority: 10
+slots:
+  - name: trip_id
+    type: integer
+    required: false
+    description: "关联出差申请ID，对应 t_expense.trip_id，非出差报销可为空"
+  - name: expense_type
+    type: string
+    required: true
+    description: "费用类别，对应 t_expense_item.category"
+    enum: ["交通", "住宿", "餐饮", "其他"]
+  - name: amount
+    type: float
+    required: true
+    description: "报销金额，对应 t_expense_item.amount"
+  - name: invoice_no
+    type: string
+    required: false
+    description: "发票号码，对应 t_invoice 关联的 t_expense_item.invoice_no"
+  - name: invoice_date
+    type: date
+    required: false
+    description: "开票日期，对应 t_expense_item.invoice_date"
+  - name: description
+    type: string
+    required: false
+    description: "费用说明，对应 t_expense_item.description"

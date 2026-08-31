@@ -1,0 +1,34 @@
+name: leave_apply
+description: "处理员工请假申请，自动校验假期余额，根据审批流配置确定审批人"
+triggers:
+  - "请假"
+  - "休假"
+  - "年假"
+  - "事假"
+  - "病假"
+  - "调休"
+  - "婚假"
+  - "产假"
+priority: 10
+slots:
+  - name: leave_type
+    type: string
+    required: true
+    description: "假别，对应 t_leave_request.leave_type"
+    enum: ["annual", "sick", "personal", "marriage", "maternity"]
+  - name: start_time
+    type: datetime
+    required: true
+    description: "请假开始时间，对应 t_leave_request.start_time"
+  - name: end_time
+    type: datetime
+    required: true
+    description: "请假结束时间，对应 t_leave_request.end_time"
+  - name: duration
+    type: float
+    required: false
+    description: "请假天数，对应 t_leave_request.duration，可由系统自动计算"
+  - name: reason
+    type: string
+    required: false
+    description: "请假原因，对应 t_leave_request.reason"

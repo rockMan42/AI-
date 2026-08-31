@@ -1,0 +1,27 @@
+name: policy_query
+description: "检索公司规章制度、操作手册、常见问题等知识文档，支持按分类和权限过滤"
+triggers:
+  - "制度"
+  - "规定"
+  - "标准"
+  - "流程"
+  - "手册"
+  - "怎么弄"
+  - "怎么办"
+  - "文档"
+priority: 10
+slots:
+  - name: query_topic
+    type: string
+    required: true
+    description: "用户想查询的制度主题关键词，用于匹配 t_document.title"
+  - name: category
+    type: string
+    required: false
+    description: "文档分类，对应 t_document.category"
+    enum: ["政策", "手册", "常见问题", "培训"]
+  - name: file_type
+    type: string
+    required: false
+    description: "文件格式偏好，对应 t_document.file_type"
+    enum: ["pdf", "docx", "md", "pptx"]

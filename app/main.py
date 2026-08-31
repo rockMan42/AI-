@@ -8,6 +8,7 @@ from app.core.milvus_client import init_milvus, close_milvus
 from app.core.redis_client import init_redis, close_redis
 from app.hermes.agent import init_hermes_agent, shutdown_hermes_agent
 from app.api.v1 import feishu_gateway_webhook
+from app.services.register_skill import get_skill_register
 
 
 @asynccontextmanager
@@ -41,6 +42,10 @@ app = FastAPI(
 )
 
 app.include_router(feishu_gateway_webhook.router, prefix=f"{settings.app_prefix}", tags=["feishu_gateway_webhook"])
+
+# 应用启动时注册skill
+register = get_skill_register()
+register.load_from_directory("./app/hermes/skills")
 
 @app.get(f"{settings.app_prefix}/health")
 async def check_health():
