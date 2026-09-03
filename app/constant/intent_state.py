@@ -8,4 +8,5 @@ class IntentState(str,Enum):
     INTENT_AMBIGUOUS = "ambiguous"
     INTENT_UNKNOWN = "unknown"
     SKILL_EXECUTING = "executing"
-
+    SKILL_COMPLETED = "completed"
+    SKILL_FAILED = "failed"

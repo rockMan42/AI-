@@ -1,4 +1,10 @@
+import logging
+
 from app.services.register_skill import SkillRegistry
+
+
+
+log = logging.getLogger(__name__)
 
 CONFIRM_THRESHOLD = 0.7
 FALLBACK_THRESHOLD = 0.4
@@ -27,11 +33,21 @@ class IntentRouter:
         # 高置信度
         if confidence >= CONFIRM_THRESHOLD:
             skill = self.register.get_skill(intent)
+
+            if skill is not None:
+                return {
+                    "action":"execute_skill",
+                    "skill":skill,
+                    "slots":extracted_slots,
+                    "confidence":confidence
+                }
+
+            log.error(f"Skill {intent} not found", exc_info=True)
+
+            # 若是技能不存在，则 fallback 降级处理
             return {
-                "action":"execute_skill",
-                "skill":skill,
-                "slots":extracted_slots,
-                "confidence":confidence
+                "action":"fallback",
+                "message":self._build_fallback_messages()
             }
 
         # 中置信度 向用户确认
