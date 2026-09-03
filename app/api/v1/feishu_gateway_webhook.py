@@ -1,14 +1,18 @@
 import asyncio
 import logging
 import json
+import re
+from dataclasses import asdict
 from fastapi import Request, APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config.settings import get_settings
 from app.core.database import get_session
 from app.core.redis_client import set_cache, get_cache
 from app.hermes.agent import get_agent
+from app.models.scheme.skill_context import SkillContext
 from app.services.register_skill import SkillRegistry, get_skill_register
 from app.services.user import get_or_create_user
+from app.skill_executor.registry import ExecutorRegistry
 from app.utils.aes_cipher import AESCipher
 from app.services.feishu import _verify_signature
 from app.services.feishu import _send_feishu_reply
@@ -17,7 +21,6 @@ from app.services.intent_router import IntentRouter
 """
 飞书网关webhook
 """
-
 SYSTEM_MESSAGE: str = """你是 AI 数字员工平台的意图分类器。根据用户消息，从以下意图中选择最匹配的一个：
                             1. requisition_apply - 物资申领（领电脑、办公用品、设备配件等）
                             2. expense_reimburse - 差旅报销（报销出差费用、提交发票等）
@@ -27,12 +30,21 @@ SYSTEM_MESSAGE: str = """你是 AI 数字员工平台的意图分类器。根据
                             6. lead_query - 线索查询（客户线索、商机、销售数据等）
                             7. performance_query - 绩效查询（考核结果、绩效评分等）
                             
+                            tips:extracted_slots的内容严格遵守skill的定义，请勿自行添加其他内容，尤其注意格式，校验等等！！！：
                             请你严格以以下 JSON 格式输出，不要有其他内容！！！：
                             {"intent": "意图编码", "confidence": 0.0~1.0, "extracted_slots": {已提取的槽位}}
                             
                             如果无法确定意图，confidence 设为 0。"""
 
-
+REPLY_SYSTEM_MESSAGE = """
+  1. 只输出纯文本，不要输出 JSON。
+            2. 禁止使用 Markdown，包括 **、*、#、-、>、``` 等符号。
+            3. 不要使用表格。
+            4. 使用换行和中文标签组织内容。
+            5. 不得修改、补充或猜测技能执行结果中的事实。
+            6. 直接输出给用户看的内容，不要解释生成过程。
+            7. 不要使用 -** ** 包裹文字
+"""
 log = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter()
@@ -105,15 +117,7 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
     # user_id 用于标识发送消息的用户,用户身份标识,会话管理,数据隔离（记忆）,权限控制
     agent = get_agent()
     try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                agent.run_conversation,
-                user_message=text,
-                system_message=SYSTEM_MESSAGE,
-                task_id=message_id,
-            ),
-            timeout=300,  # 故意设置极短，稳定触发超时
-        )
+        result = await conversation(agent, text, SYSTEM_MESSAGE, message_id)
     except asyncio.TimeoutError:
         log.exception("LLM 请求超时")
         await _send_feishu_reply(message_id, "系统繁忙，请稍后重试")
@@ -126,22 +130,78 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
     reply = result.get("final_response", "")
     print(f"reply:{reply}")
 
-    # 具体逻辑
+    # 路由skill
     intent_router = IntentRouter(register)
-    router_result = intent_router.router(json.loads(reply),user.user_id)
+    llm_result = parse_llm_json(reply)
+
+    router_result = intent_router.router(llm_result,user.user_id)
     action_ = router_result["action"]
 
     # 根据 action 的值进行不同的处理 如果是 execute_skill 则执行 skill 否则返回消息（针对中等和低等置信度）
     if action_ == "execute_skill":
+        # 校验用户权限 TODO
+        # if skill_name == "performance_query" and user.role not in ["admin", "manager"]:
+        #     reply_text = "该功能仅限主管及以上角色使用"
+        # else:
         skill_name = router_result["skill"].name
-        if skill_name == "performance_query" and user.role not in ["admin", "manager"]:
-            reply_text = "该功能仅限主管及以上角色使用"
+        executor_registry = ExecutorRegistry()
+        executor = executor_registry.get_executor(skill_name)
+        if executor:
+            context = SkillContext(
+                user_id=user.user_id,
+                open_id=user.feishu_open_id,
+                role=user.role,
+                department_id=user.department_id,
+                session_id=str(user.user_id),
+                message_id=message_id
+            )
+            extracted_slots = router_result["slots"]
+            skill_result = await executor.executor(context, extracted_slots, db)
+
+            # SkillResult 对象，不能直接与字符串拼接，需要转换为字符串 使用 json.dumps
+            prompt = (
+                f"用户问题：{text}\n"
+                f"技能执行结果：{json.dumps(asdict(skill_result), ensure_ascii=False)}\n"
+                "请根据技能执行结果生成简洁、自然的用户回复。"
+            )
+
+            result = await conversation(agent, prompt, REPLY_SYSTEM_MESSAGE, message_id)
+            reply_text = result.get("final_response", skill_result.message)
         else:
-            reply_text = "执行skill" + "路由到:" + skill_name
+            reply_text = "技能执行器未找到"
     else:
         reply_text = router_result["message"]
 
     # 通过飞书 API 发送回复
-    await _send_feishu_reply(message_id,reply_text)
+    await _send_feishu_reply(message_id, clean_markdown(reply_text))
 
     return response.success_response("飞书回复成功")
+
+# 封装对话逻辑
+async def conversation(agent, text, system_message, message_id) -> dict:
+    return await asyncio.wait_for(
+        asyncio.to_thread(
+            agent.run_conversation,
+            user_message=text,
+            system_message=system_message,
+            task_id=message_id,
+        ),
+        timeout=3000,  # 可以故意设置极短0.1，稳定触发超时
+    )
+
+
+# 清理 Markdown 格式
+def clean_markdown(text: str) -> str:
+    text = re.sub(r"[*_`#>]", "", text)
+    text = re.sub(r"(?m)^\s*-\s+", "", text)
+    return text.strip()
+
+# 解析模型返回内容
+def parse_llm_json(reply: str) -> dict:
+    start = reply.find("{")
+    if start == -1:
+        raise ValueError(f"模型未返回 JSON：{reply}")
+
+    decoder = json.JSONDecoder()
+    data, _ = decoder.raw_decode(reply[start:])
+    return data

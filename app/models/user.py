@@ -1,6 +1,7 @@
 
+
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Integer, String, Index, UniqueConstraint, ForeignKeyConstraint, func
+from sqlalchemy import Integer, String, Index, UniqueConstraint, ForeignKeyConstraint
 
 from app.models.base import Base
 
@@ -30,5 +31,3 @@ class User(Base):
     phone: Mapped[str] = mapped_column(String(20), comment="手机号")
     email: Mapped[str] = mapped_column(String(100), comment="邮箱")
     status: Mapped[str] = mapped_column(String(20), default="活动", comment="状态：活动/不活动")
-
-

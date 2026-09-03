@@ -3,7 +3,6 @@ import os
 from run_agent import AIAgent
 
 from app.config.settings import Settings
-from app.services.register_skill import get_skill_register
 
 _agent:AIAgent | None = None
 
@@ -13,9 +12,10 @@ async def init_hermes_agent(settings: Settings):
     global _agent
 
     try:
+        print(f"Dashscope API Key: {settings.dashscope_api_key}")
         _agent = AIAgent(
             provider="alibaba",
-            model="qwen-turbo",
+            model="qwen3.8-max-0902",
             api_key=settings.dashscope_api_key,
             base_url=(
                 "https://dashscope.aliyuncs.com/"
