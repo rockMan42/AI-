@@ -27,8 +27,8 @@ class IntentRouter:
                 """
 
         intent = llm_result.get("intent")
-        confidence = float(llm_result.get("confidence"))
-        extracted_slots = llm_result.get("extracted_slots")
+        confidence = float(llm_result.get("confidence") or 0.0)
+        extracted_slots = llm_result.get("extracted_slots") or {}
 
         # 高置信度
         if confidence >= CONFIRM_THRESHOLD:
@@ -52,11 +52,19 @@ class IntentRouter:
 
         # 中置信度 向用户确认
         if FALLBACK_THRESHOLD <= confidence < CONFIRM_THRESHOLD:
+            skill = self.register.get_skill(intent)
+            if skill is None:
+                return {
+                    "action":"fallback",
+                    "message":self._build_fallback_messages()
+                }
+
+            display_name = skill.display_name or skill.description
             return {
                 "action":"confirm_intent",
                 "suggested_intent":intent,
                 "confidence":confidence,
-                "message":f"请确认您的意图是否为{intent}？请确认或者重新描述"
+                "message":f"我理解您是想{display_name}，对吗？请回复“确认”继续，或重新描述。"
             }
 
         # 低置信度
@@ -68,8 +76,10 @@ class IntentRouter:
 
     def _build_fallback_messages(self) -> str:
         skills = self.register.get_all_skills()
-        skill_list= "\n".join(f"- {s.description}" for s in skills.values())
+        skill_list= "\n".join(
+            f"- {s.display_name or s.description}"
+            for s in skills.values()
+        )
         return ("抱歉，我没能理解您的意思，你可以试试以下操作:\n" +
                 f"{skill_list}\n" +
                 "请你用简单的话描述你想做的事情")
-

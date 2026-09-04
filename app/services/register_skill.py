@@ -2,6 +2,7 @@ import yaml
 import logging
 from pathlib import Path
 from dataclasses import dataclass, field
+from typing import Any
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -14,6 +15,8 @@ class SlotDefinition:
     required: bool
     description: str
     enum: list[str] = field(default_factory=list)
+    default: Any = None
+    follow_up_prompt: str | None = None
 
 
 @dataclass
@@ -24,6 +27,7 @@ class SkillSchema:
     triggers: list[str]
     priority: int
     slots: list[SlotDefinition]
+    display_name: str = ""
 
 
 # 注册skill
@@ -44,7 +48,8 @@ class SkillRegistry:
                     description=data["description"],
                     triggers=data.get("triggers", []),
                     priority=data.get("priority",0),
-                    slots=slots
+                    slots=slots,
+                    display_name=data.get("display_name") or data["name"],
                 )
                 self._skills[skill.name] = skill
                 log.info(f"Skill注册成功:{skill.name}")

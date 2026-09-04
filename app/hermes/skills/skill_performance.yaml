@@ -1,4 +1,5 @@
 name: performance_query
+display_name: "查询绩效"
 description: "查询员工个人绩效考核结果，包括评分、等级、部门排名及主管评语"
 triggers:
   - "绩效"
@@ -11,9 +12,13 @@ slots:
   - name: period
     type: string
     required: true
+    default: null
+    follow_up_prompt: "请问要查询哪个绩效周期？（如2026-H1或2026-Q1）"
     description: "绩效周期，对应 t_performance.period，如 2026-H1、2026-Q1"
   - name: grade
     type: string
     required: false
+    default: null
+    follow_up_prompt: "需要筛选哪个绩效等级？（S/A/B/C/D）"
     description: "按等级筛选，对应 t_performance.grade"
     enum: ["S", "A", "B", "C", "D"]

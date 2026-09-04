@@ -1,4 +1,5 @@
 name: attendance_query
+display_name: "查询考勤"
 description: "查询员工个人考勤打卡记录、工时统计、异常状态，支持按日/按月查询"
 triggers:
   - "考勤"
@@ -13,13 +14,19 @@ slots:
   - name: query_date
     type: date
     required: false
+    default: "today"
+    follow_up_prompt: "请问你要查询哪一天的考勤？（如不填写则默认查询今天）"
     description: "查询具体日期（格式：2025-08-18），对应 t_attendance.date，不填默认今天（例如：2025-08-18）"
   - name: query_month
     type: string
     required: false
+    default: null
+    follow_up_prompt: "请问你要查询哪个月份的考勤？（如2025-08）"
     description: "查询月份（格式：2025-08），用于查询 t_attendance 月度汇总"
   - name: status_filter
     type: string
     required: false
+    default: null
+    follow_up_prompt: "需要筛选哪种考勤状态？（正常/迟到/早退/缺勤/请假）"
     description: "按状态筛选，对应 t_attendance.status"
     enum: ["正常", "迟到", "早退", "缺勤", "请假"]

@@ -7,4 +7,7 @@ from app.skill_executor.base import BaseSkillExecutor, SkillResult
 class RequisitionSkillExecutor(BaseSkillExecutor):
 
     async def executor(self,context: SkillContext, slots: dict, db: AsyncSession) -> SkillResult:
-        pass
+        return SkillResult(
+            success=True,
+            message="物资申请成功"
+        )

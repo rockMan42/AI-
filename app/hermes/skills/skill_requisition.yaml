@@ -1,4 +1,5 @@
 name: requisition_apply
+display_name: "申领物资"
 description: "处理办公用品、IT设备等实物物资的申领申请，支持按品类动态收集规格字段"
 triggers:
   - "申领"
@@ -12,21 +13,31 @@ slots:
   - name: item_category
     type: string
     required: true
+    default: null
+    follow_up_prompt: "请问你要申领什么品类？（IT设备/办公用品/劳保用品）"
     description: "物资分类，对应 t_requisition.item_category"
-    enum: ["办公用品", "IT设备", "其他"]
+    enum: ["办公用品", "IT设备", "劳保用品"]
   - name: item_name
     type: string
     required: true
+    default: null
+    follow_up_prompt: "具体要领什么物品？"
     description: "物资名称，对应 t_requisition.item_name"
   - name: specification
     type: string
     required: false
+    default: null
+    follow_up_prompt: "有什么规格要求吗？（如颜色、尺寸等）"
     description: "规格型号，对应 t_requisition.specification，由 t_category_field_mapping 动态决定是否为必填"
   - name: quantity
     type: integer
     required: true
+    default: 1
+    follow_up_prompt: "需要多少个？"
     description: "申领数量，对应 t_requisition.quantity，默认1"
   - name: reason
     type: string
-    required: false
+    required: true
+    default: null
+    follow_up_prompt: "请简单说明申领理由"
     description: "申领原因，对应 t_requisition.reason"

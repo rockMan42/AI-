@@ -82,3 +82,44 @@ async def set_cache(key: str, value: str, expire: int = None) -> bool:
     except Exception as e:
         print(f"设置缓存失败:{e}")
         raise e
+
+
+async def set_cache_if_absent(
+    key: str,
+    value: str,
+    expire: int,
+) -> bool:
+    """原子写入缓存；键已存在时返回 False。"""
+    global redis_client
+    if redis_client is None:
+        raise RuntimeError("redis client not initialized")
+
+    try:
+        return bool(
+            await redis_client.set(
+                key,
+                value,
+                ex=expire,
+                nx=True,
+            )
+        )
+    except Exception as e:
+        print(f"原子设置缓存失败:{e}")
+        raise e
+
+
+async def delete_cache(*keys: str) -> int:
+    """删除一个或多个缓存key"""
+
+    global redis_client
+    if redis_client is None:
+        raise RuntimeError("redis client not initialized")
+
+    if not keys:
+        return 0
+
+    try:
+        return await redis_client.delete(*keys)
+    except Exception as e:
+        print(f"删除缓存数据失败:{e}")
+        raise e
