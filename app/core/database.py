@@ -4,6 +4,10 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from app.config.settings import Settings
 
 
+_engine = None
+_session_factory: async_sessionmaker[AsyncSession] | None = None
+
+
 async def init_db(settings: Settings):
     """初始化 MySql 异步引擎和会话工厂"""
     global  _engine, _session_factory
@@ -27,6 +31,12 @@ async def get_session() -> AsyncSession:
     async with _session_factory() as session:
         yield session
 
+
+def create_session() -> AsyncSession:
+    if _session_factory is None:
+        raise RuntimeError("数据库尚未初始化")
+    return _session_factory()
+
 async def close_db():
     """关闭数据库引擎"""
     if _engine:
@@ -40,4 +50,3 @@ async def check_db() -> str:
             return "connected"
     except Exception as e:
         return f"error:{e}"
-

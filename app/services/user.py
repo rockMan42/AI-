@@ -6,7 +6,7 @@ from fastapi import Depends
 from app.core.database import get_session
 from app.models.user import User
 from app.services.department import get_or_create_department
-from app.services.feishu import get_feishu_user_detail
+from app.services.conversation_engine.feishu import get_feishu_user_detail
 
 
 # 获取或者创建用户

@@ -2,8 +2,7 @@ import json
 import time
 
 from app.core.redis_client import set_cache, get_cache, delete_cache
-from app.services.slot_manage import SessionSlots, SESSION_TTL, SlotState
-
+from app.services.conversation_engine.slot_manage import SessionSlots, SESSION_TTL
 
 
 class SessionStore:

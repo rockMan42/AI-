@@ -12,20 +12,20 @@ from app.config.settings import get_settings
 from app.constant.intent_state import IntentState
 from app.core.database import get_session
 from app.core.redis_client import set_cache_if_absent
-from app.services.conversation_manager import ConversationManager
+from app.services.conversation_engine.conversation_manager import ConversationManager
 from app.hermes.agent import get_agent
 from app.models.scheme.skill_context import SkillContext
-from app.services.register_skill import SkillRegistry, get_skill_register
-from app.services.session_store import SessionStore
-from app.services.slot_collector import SlotCollector
-from app.services.slot_manage import SessionSlots
+from app.services.conversation_engine.register_skill import SkillRegistry, get_skill_register
+from app.services.conversation_engine.session_store import SessionStore
+from app.services.conversation_engine.slot_collector import SlotCollector
+from app.services.conversation_engine.slot_manage import SessionSlots
 from app.services.user import get_or_create_user
 from app.skill_executor.registry import ExecutorRegistry
 from app.utils.aes_cipher import AESCipher
-from app.services.feishu import _verify_signature
-from app.services.feishu import _send_feishu_reply
+from app.services.conversation_engine.feishu import _verify_signature
+from app.services.conversation_engine.feishu import _send_feishu_reply
 from app.utils import response
-from app.services.intent_router import FALLBACK_THRESHOLD, IntentRouter
+from app.services.conversation_engine.intent_router import FALLBACK_THRESHOLD, IntentRouter
 """
 飞书网关webhook
 """

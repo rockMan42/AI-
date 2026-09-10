@@ -4,10 +4,10 @@ from copy import deepcopy
 from datetime import date, datetime
 from typing import Any
 
-from app.services.category_template import load_category_template
-from app.services.register_skill import SkillSchema
-from app.services.session_store import SessionStore
-from app.services.slot_manage import MAX_TURNS, SessionSlots, SlotState
+from app.services.conversation_engine.category_template import load_category_template
+from app.services.conversation_engine.register_skill import SkillSchema
+from app.services.conversation_engine.session_store import SessionStore
+from app.services.conversation_engine.slot_manage import MAX_TURNS, SessionSlots, SlotState
 
 
 logger = logging.getLogger(__name__)

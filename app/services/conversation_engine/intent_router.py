@@ -1,6 +1,6 @@
 import logging
 
-from app.services.register_skill import SkillRegistry
+from app.services.conversation_engine.register_skill import SkillRegistry
 
 
 

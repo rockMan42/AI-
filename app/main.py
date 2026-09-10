@@ -1,15 +1,28 @@
 # FastAPI入口
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI,Request
+from fastapi import FastAPI
 from app.config.settings import get_settings
 from app.core.database import init_db, close_db
 from app.core.milvus_client import init_milvus, close_milvus
+from app.core.minio_client import init_minio, close_minio
 from app.core.redis_client import init_redis, close_redis
 from app.hermes.agent import init_hermes_agent, shutdown_hermes_agent
-from app.api.v1 import feishu_gateway_webhook
-from app.services.register_skill import get_skill_register
+from app.api.v1 import feishu_gateway_webhook, knowledge
+from app.services.conversation_engine.register_skill import get_skill_register
+from app.services.knowledge.document_cleanup import (
+    start_cleanup_worker,
+    stop_cleanup_worker,
+)
 
+from app.core.embedding_client import (
+    close_embedding,
+    init_embedding,
+)
+from app.services.knowledge.knowledge_index_service import (
+    start_embedding_worker,
+    stop_embedding_worker,
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -20,7 +33,11 @@ async def lifespan(app: FastAPI):
     await init_db(settings)
     await init_redis(settings)
     await init_milvus(settings)
+    await init_embedding(settings)
+    await init_minio(settings)
     await init_hermes_agent(settings)
+    await start_embedding_worker(settings)
+    await start_cleanup_worker(settings)
 
     """
     yield 之前的代码在应用程序启动时运行（设置资源）。
@@ -29,7 +46,11 @@ async def lifespan(app: FastAPI):
     yield
 
     # 按照逆序释放资源(逆序释放是保证程序稳定退出、避免 RuntimeError 的标准做法，也是微服务和资源管理中的最佳实践)
+    await stop_cleanup_worker()
+    await stop_embedding_worker()
     await shutdown_hermes_agent()
+    await close_embedding()
+    await close_minio()
     await close_milvus()
     await close_redis()
     await close_db()
@@ -42,6 +63,8 @@ app = FastAPI(
 )
 
 app.include_router(feishu_gateway_webhook.router, prefix=f"{settings.app_prefix}", tags=["feishu_gateway_webhook"])
+app.include_router(knowledge.router, prefix=f"{settings.app_prefix}", tags=["knowledge"])
+app.include_router(knowledge.collection_router, prefix=f"{settings.app_prefix}", tags=["knowledge"])
 
 # 应用启动时注册skill
 register = get_skill_register()
@@ -59,7 +82,3 @@ async def check_health():
         "redis":await check_redis(),
         "milvus":await check_milvus()
     }
-
-
-
-

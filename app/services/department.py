@@ -2,7 +2,7 @@ from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.department import Department
-from app.services.feishu import get_feishu_department_detail
+from app.services.conversation_engine.feishu import get_feishu_department_detail
 
 
 async def get_or_create_department(

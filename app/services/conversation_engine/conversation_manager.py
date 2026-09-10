@@ -1,9 +1,9 @@
 import time
 
 from app.constant.intent_state import IntentState
-from app.services.register_skill import SkillSchema
-from app.services.session_store import SessionStore
-from app.services.slot_manage import (
+from app.services.conversation_engine.register_skill import SkillSchema
+from app.services.conversation_engine.session_store import SessionStore
+from app.services.conversation_engine.slot_manage import (
     MAX_SUSPENDED_CONTEXTS,
     TERMINAL_WORKFLOW_STATES,
     SessionSlots,
