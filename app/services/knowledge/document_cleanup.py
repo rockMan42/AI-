@@ -35,6 +35,9 @@ async def resume_pending_deletions(settings: Settings) -> int:
 
 async def start_cleanup_worker(settings: Settings) -> None:
     global _worker, _stop_event
+
+    if settings.knowledge_maintenance:
+        return
     if _worker is not None:
         return
     _stop_event = asyncio.Event()

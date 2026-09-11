@@ -1,0 +1,59 @@
+[
+  {
+    "id": "W1",
+    "category": "warmup",
+    "request_id": "13a72da9ad4e44708ddd34254bf34225",
+    "worker": 0,
+    "actor_id": 7,
+    "started_monotonic": 679679.681804166,
+    "ok": true,
+    "response": {
+      "answer": "抱歉，我在企业知识库中没有找到与您问题高度相关的内容。建议您联系相关部门获取更准确的信息。",
+      "references": [],
+      "is_low_confidence": true
+    },
+    "elapsed_ms": 296.5679590124637,
+    "finished_monotonic": 679679.978373458
+  },
+  {
+    "id": "W2",
+    "category": "warmup",
+    "request_id": "5516511205b64ba39df38a6f00e89252",
+    "worker": 0,
+    "actor_id": 7,
+    "started_monotonic": 679679.978397833,
+    "ok": true,
+    "response": {
+      "answer": "每月补卡最多3次。\n\n参考来源：\n[员工考勤管理制度-2026版 > 员工考勤管理制度（2026年版） > 第六章 补卡规则]",
+      "references": [
+        {
+          "doc_id": "doc_20260911115039_21cb39084ccd",
+          "doc_version": "v1.0",
+          "doc_title": "员工考勤管理制度-2026版",
+          "title_path": "员工考勤管理制度（2026年版） > 第六章 补卡规则",
+          "chunk_index": 20,
+          "score": 0.8328186644921168
+        }
+      ],
+      "is_low_confidence": false
+    },
+    "elapsed_ms": 740.4335420578718,
+    "finished_monotonic": 679680.718832708
+  },
+  {
+    "id": "W3",
+    "category": "warmup",
+    "request_id": "238aaddb5abc4a018f30ac68233f9e6f",
+    "worker": 0,
+    "actor_id": 7,
+    "started_monotonic": 679680.718876916,
+    "ok": true,
+    "response": {
+      "answer": "抱歉，我在企业知识库中没有找到与您问题高度相关的内容。建议您联系相关部门获取更准确的信息。",
+      "references": [],
+      "is_low_confidence": true
+    },
+    "elapsed_ms": 162.78112505096942,
+    "finished_monotonic": 679680.881658875
+  }
+]

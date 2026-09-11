@@ -1,0 +1,35 @@
+{
+  "before": {
+    "count": 80,
+    "p50_ms": 394.80966597329825,
+    "p95_ms": 2602.9918330023065,
+    "p99_ms": 3187.761167064309,
+    "max_ms": 3187.761167064309,
+    "errors": 0,
+    "over_5s": 0,
+    "generated": 37,
+    "generation_median_ms": 1504.89,
+    "generation_max_ms": 2841.98,
+    "generation_mean_output_tokens": 51.78378378378378,
+    "cache_hits": 0,
+    "cache_observations": 80
+  },
+  "after": {
+    "count": 80,
+    "p50_ms": 413.77774998545647,
+    "p95_ms": 1309.5798750873655,
+    "p99_ms": 2069.3363330792636,
+    "max_ms": 2069.3363330792636,
+    "errors": 0,
+    "over_5s": 0,
+    "generated": 37,
+    "generation_median_ms": 759.33,
+    "generation_max_ms": 1690.94,
+    "generation_mean_output_tokens": 19.81081081081081,
+    "cache_hits": 0,
+    "cache_observations": 80
+  },
+  "source_unchanged": true,
+  "expected_permission_errors": 5,
+  "note": "前后为相隔约14分钟的单轮实测，包含外部模型波动；提示词和输出上限同时调整，无法分离各自贡献。"
+}

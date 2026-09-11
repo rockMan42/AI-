@@ -1,4 +1,5 @@
 import json
+from app.core.rag_context import timed
 
 import httpx
 from app.config.settings import get_settings
@@ -37,6 +38,7 @@ async def _get_tenant_access_token() -> str:
 
         return token
 
+@timed("feishu_send")
 async def _send_feishu_reply(message_id: str, text: str):
     """回复飞书消息（基于原消息id进行回复）"""
     token = await _get_tenant_access_token()

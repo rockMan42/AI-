@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
+from plugins.image_gen import fal
 from pydantic import ConfigDict, Field,BaseModel
 
 
@@ -76,4 +77,25 @@ class CollectionStatusResponse(BaseModel):
     indexes: list[str]
     load_state: str
 
+class KnowledgeSearchRequest(BaseModel):
+    query: str = Field(min_length=1,max_length=1024)
+    top_k: int = Field(default=5,ge=1,le=20,strict=True)
+    permission_level: PermissionLevel = PermissionLevel.INTERNAL
 
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra='forbid'
+    )
+
+class KnowledgeReference(BaseModel):
+    doc_id: str
+    doc_version: str
+    doc_title: str
+    title_path: str
+    chunk_index: int
+    score: float = Field(default=0,ge=0,le=1,allow_inf_nan=False)
+
+class KnowledgeSearchResponse(BaseModel):
+    answer: str
+    references: list[KnowledgeReference]
+    is_low_confidence: bool

@@ -1,3 +1,4 @@
+from app.core.rag_context import phase, traced
 import asyncio
 import hashlib
 import logging
@@ -14,7 +15,7 @@ from app.core.database import get_session
 from app.core.redis_client import set_cache_if_absent
 from app.services.conversation_engine.conversation_manager import ConversationManager
 from app.hermes.agent import get_agent
-from app.models.scheme.skill_context import SkillContext
+from app.schemas.scheme.skill_context import SkillContext
 from app.services.conversation_engine.register_skill import SkillRegistry, get_skill_register
 from app.services.conversation_engine.session_store import SessionStore
 from app.services.conversation_engine.slot_collector import SlotCollector
@@ -24,6 +25,7 @@ from app.skill_executor.registry import ExecutorRegistry
 from app.utils.aes_cipher import AESCipher
 from app.services.conversation_engine.feishu import _verify_signature
 from app.services.conversation_engine.feishu import _send_feishu_reply
+from app.security.auth import ACTIVE_STATUSES
 from app.utils import response
 from app.services.conversation_engine.intent_router import FALLBACK_THRESHOLD, IntentRouter
 """
@@ -61,6 +63,7 @@ conversation_manager = ConversationManager(session_store)
 slot_collector = SlotCollector(session_store)
 
 @router.post("/webhook/feishu")
+@traced
 async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session),register: SkillRegistry = Depends(get_skill_register)):
     """接受飞书事件，处理消息并调用Agent回复"""
 
@@ -153,6 +156,12 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
 
     # 获取或创建系统用户
     user = await get_or_create_user(open_id,db)
+    if user.status not in ACTIVE_STATUSES:
+        await _send_feishu_reply(
+            message_id,
+            "当前用户已停用，无法使用此服务。",
+        )
+        return response.success_response("User disabled")
 
     # 收到消息 等待意图识别
     session_id = str(user.user_id)
@@ -214,7 +223,8 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
         )
 
         # 调用大模型进行意图分类
-        result = await conversation(agent, classification_input, intent_system_prompt, message_id)
+        with phase("feishu_intent"):
+            result = await conversation(agent, classification_input, intent_system_prompt, message_id)
 
     except asyncio.TimeoutError:
         log.exception("LLM 请求超时")
@@ -245,7 +255,7 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
             register,
         ) or intent_router.router(llm_result, user.user_id)
     except (ValueError,TypeError,AttributeError):
-        log.error(f"LLM 意图分类结果解析失败: %s",reply)
+        log.error("LLM意图分类结果解析失败")
         await conversation_manager.update_intent_state(
             session_id,
             user.user_id,
@@ -449,13 +459,31 @@ async def handle_skill_action(
         confidence=router_result["confidence"],
     )
 
+    # 首次直接执行知识查询时保留问题原文
+    extracted_slots = dict(router_result.get("slots") or {})
+
+    control_messages = RETRY_MESSAGES | {
+        "确认", "是", "是的", "对", "对的",
+    }
+
+    if (
+        skill.name == "policy_query"
+        and text.strip() not in control_messages
+    ):
+        extracted_slots["query_topic"] = text.strip()
+
     collection_result = await slot_collector.collect(
         session,
         skill,
-        router_result.get("slots", {}),
+        extracted_slots,
     )
 
-    log.info(f"Slot collection result: {json.dumps(collection_result, ensure_ascii=False)}")
+    log.info(
+        "slot_collection intent=%s action=%s slot_names=%s",
+        skill.name,
+        collection_result["action"],
+        list(collection_result.get("slots", {})),
+    )
 
     if collection_result["action"] != "execute":
         return collection_result["message"]
@@ -510,6 +538,10 @@ async def handle_skill_action(
         )
         return "业务处理失败，请稍后重试。"
 
+    # 知识回答不再交给 LLM 改写
+    if skill.name == "policy_query":
+        return skill_result.message
+
     prompt = (
         f"用户问题：{text}\n"
         f"技能执行结果：{json.dumps(asdict(skill_result), ensure_ascii=False)}\n"
@@ -542,6 +574,10 @@ async def conversation(
     if agent is None:
         raise RuntimeError("Hermes Agent 尚未初始化")
 
+    # 临时排查：打印当前 Agent 持有的密钥，排查完成后移除此日志。
+    log.info("dashscope_agent_request model=%s api_key=%s",
+             agent.model, agent.api_key)
+
     return await asyncio.wait_for(
         asyncio.to_thread(
             agent.run_conversation,
@@ -566,7 +602,8 @@ def clean_markdown(text: str, fallback: str = "") -> str:
         cutoff = min(cutoff, line_start)
 
     text = text[:cutoff]
-    text = re.sub(r"[*_`#>]", "", text)
+    text = re.sub(r"[*_`#]", "", text)
+    text = re.sub(r"(?m)^[ \t]*>[ \t]?", "", text)
     text = re.sub(r"(?m)^\s*-\s+", "", text)
     cleaned = text.strip()
     return cleaned or str(fallback or "").strip()

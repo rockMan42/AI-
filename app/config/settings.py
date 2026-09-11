@@ -1,8 +1,10 @@
 # API路由层
-from functools import lru_cache
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
+from pathlib import Path
+from typing import Literal
+from pydantic import model_validator
 
 # 继承了BaseSettings，因此允许从环境变量中自动读取配置映射到对应的字段,不区分大小写
 class Settings(BaseSettings):
@@ -34,7 +36,41 @@ class Settings(BaseSettings):
     milvus_hnsw_m: int = 16
     milvus_hnsw_ef_construction: int = 200
     milvus_search_ef: int = 128
-    milvus_insert_batch_size: int = Field(default_factory=500,ge=1,le=5000)
+    milvus_insert_batch_size: int = Field(default=500,ge=1,le=5000)
+
+    # RAG
+    rerank_api_url: str = ""
+    rerank_model: str = "gte-rerank-v2"
+
+    rag_llm_base_url: str = (
+        "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
+    rag_llm_model: str = "qwen-plus"
+    rag_max_tokens: int = Field(default=512, gt=64,le=2048)
+    rag_rerank_min_score: float = Field(default=0.15, ge=0, le=1)
+    rag_rerank_high_score: float = Field(default=0.4, ge=0, le=1)
+
+    rag_query_timeout_seconds: float = Field(default=5.0, gt=0, le=5)
+    rag_query_concurrency: int = Field(default=5, ge=1, le=5)
+    knowledge_retrieval_mode: Literal["dense", "hybrid"] = "dense"
+    # 与检索模式分开，使新索引可先做纯向量对照。
+    milvus_bm25_enabled: bool = False
+    knowledge_maintenance: bool = False
+    query_embedding_cache_enabled: bool = True
+    query_embedding_cache_ttl: int = Field(default=86400, ge=1)
+    query_embedding_cache_timeout_seconds: float = Field(default=0.05, gt=0, le=0.2)
+    knowledge_chunk_target_tokens: int = Field(default=384, ge=1)
+    knowledge_chunk_max_tokens: int = Field(default=512, ge=2, le=512)
+    knowledge_chunk_min_tokens: int = Field(default=50, ge=1)
+
+    # 整个RAG服务调用的超时，不代表性能验收已经通过
+    rag_timeout_seconds: float = Field(default=30.0, gt=0)
+
+    # Fernet 密码，与飞书消息解密密钥分开
+    knowledge_log_key: SecretStr = SecretStr("sdfsdfds")
+
+    # 企业实际需要过滤的词语
+    knowledge_sensitive_words: list[str] = Field(default_factory=list)
 
     # 百炼 Embedding & 百练平台 API KEY
     dashscope_api_key: str  = ""
@@ -116,8 +152,8 @@ class Settings(BaseSettings):
 
     # 指定了 env_file = ".env"，就不再需要手动 load_dotenv() 了, 启动时自动读取.env配置
     model_config = {
-        "env_file":".env",
-        "env_file_encoding":"utf-8"
+        "env_file": Path(__file__).resolve().parents[2] / ".env",
+        "env_file_encoding": "utf-8",
     }
 
     @property
@@ -125,7 +161,15 @@ class Settings(BaseSettings):
         scheme = "https" if self.milvus_secure else "http"
         return f"{scheme}://{self.milvus_host}:{self.milvus_port}"
 
+    @model_validator(mode="after")
+    def validate_retrieval(self):
+        if not (self.knowledge_chunk_min_tokens < self.knowledge_chunk_target_tokens
+                <= self.knowledge_chunk_max_tokens):
+            raise ValueError("切块尺寸必须满足 min < target <= max")
+        if self.knowledge_retrieval_mode == "hybrid" and not self.milvus_bm25_enabled:
+            raise ValueError("混合检索要求启用BM25索引")
+        return self
+
 
 def get_settings() -> Settings:
     return Settings()
-

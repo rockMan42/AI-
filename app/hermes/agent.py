@@ -1,11 +1,29 @@
+import asyncio
+import json
 import os
+import sys
+from pathlib import Path
 
+import yaml
+from pydantic import SecretStr
 from run_agent import AIAgent
+from tools.mcp_tool import register_mcp_servers, shutdown_mcp_servers
 
 from app.config.settings import Settings
+from app.core.rag_client import RAGError
+from app.core.rag_context import query_scope, phase
+from app.hermes.knowledge_mcp_client import KnowledgeMCPClient
+from app.models import User
+from app.schemas.scheme.knowledge import KnowledgeSearchRequest, KnowledgeSearchResponse
+from app.security.knowledge import issue_identity_token
+from tools.registry import registry
 
 _agent_settings: Settings | None = None
+_knowledge_client: KnowledgeMCPClient | None = None
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SERVER_NAME = "enterprise_knowledge_mcp"
+TOOL_NAME = f"mcp__{SERVER_NAME}__knowledge_search"
 
 def _create_agent(settings: Settings) -> AIAgent:
     """创建请求级 Agent，避免并发请求共享内部会话和流状态。"""
@@ -18,6 +36,7 @@ def _create_agent(settings: Settings) -> AIAgent:
             "compatible-mode/v1"
         ),
         quiet_mode=True,
+        disabled_toolsets=[f"mcp-{SERVER_NAME}"]
         # skills_dir="app/hermes/skills",
         # tools_dir="app/hermes/tools",
         # mcp_dir="app/hermes/mcp",
@@ -26,10 +45,33 @@ def _create_agent(settings: Settings) -> AIAgent:
 async def init_hermes_agent(settings: Settings):
     """初始化hermes_agent"""
 
-    global _agent_settings
+    global _agent_settings, _knowledge_client
 
     try:
-        _create_agent(settings)
+
+        servers = _mcp_config(settings)
+        knowledge_server = servers.pop(SERVER_NAME)
+        if servers:
+            await asyncio.to_thread(register_mcp_servers, servers)
+        _knowledge_client = KnowledgeMCPClient(
+            knowledge_server, cwd=str(PROJECT_ROOT),
+            concurrency=settings.rag_query_concurrency,
+        )
+        discovered = await _knowledge_client.start()
+        tool = next((tool for tool in discovered if tool.name == "knowledge_search"), None)
+        if tool is None:
+            raise RuntimeError("知识 MCP 未发现 knowledge_search")
+        registry.register(
+            name=TOOL_NAME, toolset=f"mcp-{SERVER_NAME}",
+            schema={"name": TOOL_NAME, "description": tool.description or "知识库检索",
+                    "parameters": tool.inputSchema},
+            handler=_knowledge_client.handler, override=True,
+        )
+
+        if registry.get_entry(TOOL_NAME) is None:
+            raise RuntimeError("knowledge_search MCP工具注册失败")
+
+        await asyncio.to_thread(_create_agent, settings)
         _agent_settings = settings
 
         print("Hermes Agent 初始化成功，已进入 READY 状态")
@@ -37,14 +79,98 @@ async def init_hermes_agent(settings: Settings):
     except Exception as e:
         print(f"Hermes Agent 初始化失败:{e}")
         _agent_settings = None
+        if _knowledge_client is not None:
+            await _knowledge_client.close()
+            _knowledge_client = None
+        raise
     return _agent_settings
 
+def _mcp_config(settings: Settings) -> dict:
+    path = PROJECT_ROOT / "config" / "hermes.yaml"
+    with path.open(encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+
+    server = dict(config["mcp_servers"][SERVER_NAME])
+    server["command"] = sys.executable
+
+    # 将父进程实际生效的配置传给子进程，避免配置不一致
+    environment = {}
+
+    for name, value in settings:
+        if value is None:
+            continue
+        if isinstance(value, SecretStr):
+            value = value.get_secret_value()
+        elif isinstance(value, (list, dict, bool)):
+            value = json.dumps(value, ensure_ascii=False)
+        else:
+            value = str(value)
+
+        environment[name.upper()] = value
+
+    environment["PYTHONPATH"] = str(PROJECT_ROOT)
+    environment["PYTHONUNBUFFERED"] = "1"
+
+    server["env"] = environment
+    servers = dict(config["mcp_servers"])
+    servers[SERVER_NAME] = server
+    return servers
+
+
 async def shutdown_hermes_agent():
-    global _agent_settings
+    global _agent_settings, _knowledge_client
     _agent_settings = None
+    client, _knowledge_client = _knowledge_client, None
+    if client is not None:
+        await client.close()
+    await asyncio.to_thread(shutdown_mcp_servers)
 
 def get_agent() -> AIAgent | None:
     """为当前请求创建独立 Agent 实例。"""
     if _agent_settings is None:
         return None
     return _create_agent(_agent_settings)
+
+async def call_knowledge_search(
+    request: KnowledgeSearchRequest,
+    user: User
+) -> KnowledgeSearchResponse:
+    if _agent_settings is None:
+        raise RAGError("Hermes尚未初始化")
+
+    if _agent_settings.knowledge_maintenance:
+        raise RAGError("知识库维护中")
+    try:
+        with query_scope(_agent_settings.rag_query_timeout_seconds) as budget, phase("caller_total"):
+            async with asyncio.timeout(budget.remaining()):
+                arguments = request.model_dump(mode="json")
+                arguments["identity_token"] = issue_identity_token(user, _agent_settings)
+                raw = await asyncio.to_thread(registry.dispatch, TOOL_NAME, arguments)
+                return _decode_knowledge_result(raw)
+    except TimeoutError:
+        raise RAGError("知识检索超时") from None
+
+
+def _decode_knowledge_result(raw) -> KnowledgeSearchResponse:
+
+    try:
+        envelope = json.loads(raw) if isinstance(raw, str) else raw
+
+        if not isinstance(envelope,dict):
+            raise ValueError("无效的MCP工具返回格式")
+
+        if envelope.get("error"):
+            raise RAGError("RAG工具执行失败，请检查服务日志")
+
+        payload = envelope.get("structuredContent")
+        if payload is None:
+            payload = envelope.get("result")
+
+        if isinstance(payload,str):
+            payload = json.loads(payload)
+
+        return KnowledgeSearchResponse.model_validate(payload)
+    except RAGError:
+        raise
+    except (ValueError, TypeError):
+        raise RAGError("知识工具返回格式错误") from None

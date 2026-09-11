@@ -1,0 +1,77 @@
+[
+  {
+    "id": "W1",
+    "category": "warmup",
+    "request_id": "6037bdd1d03a4f3a9934db1b11cdc7a4",
+    "worker": 0,
+    "actor_id": 7,
+    "started_monotonic": 680222.79631275,
+    "ok": true,
+    "response": {
+      "answer": "8小时\n\n参考来源：\n[员工考勤管理制度-2026版 > 员工考勤管理制度（2026年版） > 第二章 工作时间]",
+      "references": [
+        {
+          "doc_id": "doc_20260911115039_21cb39084ccd",
+          "doc_version": "v1.0",
+          "doc_title": "员工考勤管理制度-2026版",
+          "title_path": "员工考勤管理制度（2026年版） > 第二章 工作时间",
+          "chunk_index": 4,
+          "score": 0.32297133097547615
+        }
+      ],
+      "is_low_confidence": false
+    },
+    "elapsed_ms": 1412.3031250201166,
+    "finished_monotonic": 680224.2086165
+  },
+  {
+    "id": "W2",
+    "category": "warmup",
+    "request_id": "6cd23e9fa45145fa9313e0fe330a0695",
+    "worker": 0,
+    "actor_id": 7,
+    "started_monotonic": 680224.208687333,
+    "ok": true,
+    "response": {
+      "answer": "每月补卡最多3次。\n\n参考来源：\n[员工考勤管理制度-2026版 > 员工考勤管理制度（2026年版） > 第六章 补卡规则]",
+      "references": [
+        {
+          "doc_id": "doc_20260911115039_21cb39084ccd",
+          "doc_version": "v1.0",
+          "doc_title": "员工考勤管理制度-2026版",
+          "title_path": "员工考勤管理制度（2026年版） > 第六章 补卡规则",
+          "chunk_index": 20,
+          "score": 0.8328186644921168
+        }
+      ],
+      "is_low_confidence": false
+    },
+    "elapsed_ms": 1254.6323329443112,
+    "finished_monotonic": 680225.463321041
+  },
+  {
+    "id": "W3",
+    "category": "warmup",
+    "request_id": "394f5a8ddcea4630b54a1e971f0d99fa",
+    "worker": 0,
+    "actor_id": 7,
+    "started_monotonic": 680225.46339125,
+    "ok": true,
+    "response": {
+      "answer": "18:00\n\n参考来源：\n[员工考勤管理制度-2026版 > 员工考勤管理制度（2026年版） > 第二章 工作时间]",
+      "references": [
+        {
+          "doc_id": "doc_20260911115039_21cb39084ccd",
+          "doc_version": "v1.0",
+          "doc_title": "员工考勤管理制度-2026版",
+          "title_path": "员工考勤管理制度（2026年版） > 第二章 工作时间",
+          "chunk_index": 4,
+          "score": 0.23675443520387893
+        }
+      ],
+      "is_low_confidence": false
+    },
+    "elapsed_ms": 1165.443249978125,
+    "finished_monotonic": 680226.628835166
+  }
+]

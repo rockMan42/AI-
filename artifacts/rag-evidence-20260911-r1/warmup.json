@@ -1,0 +1,77 @@
+[
+  {
+    "id": "W1",
+    "category": "warmup",
+    "request_id": "a993cfc033394f48bf1acdd5fb4a9076",
+    "worker": 0,
+    "actor_id": 7,
+    "started_monotonic": 679933.389158958,
+    "ok": true,
+    "response": {
+      "answer": "每日标准工时是8小时。\n\n参考来源：\n[员工考勤管理制度-2026版 > 员工考勤管理制度（2026年版） > 第二章 工作时间]",
+      "references": [
+        {
+          "doc_id": "doc_20260911115039_21cb39084ccd",
+          "doc_version": "v1.0",
+          "doc_title": "员工考勤管理制度-2026版",
+          "title_path": "员工考勤管理制度（2026年版） > 第二章 工作时间",
+          "chunk_index": 4,
+          "score": 0.32297133097547615
+        }
+      ],
+      "is_low_confidence": false
+    },
+    "elapsed_ms": 1655.8662919560447,
+    "finished_monotonic": 679935.04502675
+  },
+  {
+    "id": "W2",
+    "category": "warmup",
+    "request_id": "b369f4bc44f8467292e549760c18c391",
+    "worker": 0,
+    "actor_id": 7,
+    "started_monotonic": 679935.045114666,
+    "ok": true,
+    "response": {
+      "answer": "每月补卡最多3次。\n\n参考来源：\n[员工考勤管理制度-2026版 > 员工考勤管理制度（2026年版） > 第六章 补卡规则]",
+      "references": [
+        {
+          "doc_id": "doc_20260911115039_21cb39084ccd",
+          "doc_version": "v1.0",
+          "doc_title": "员工考勤管理制度-2026版",
+          "title_path": "员工考勤管理制度（2026年版） > 第六章 补卡规则",
+          "chunk_index": 20,
+          "score": 0.8331176527457775
+        }
+      ],
+      "is_low_confidence": false
+    },
+    "elapsed_ms": 1419.7109170490876,
+    "finished_monotonic": 679936.464826125
+  },
+  {
+    "id": "W3",
+    "category": "warmup",
+    "request_id": "32ac4887123b4356b5b7a4729fa2a537",
+    "worker": 0,
+    "actor_id": 7,
+    "started_monotonic": 679936.464929458,
+    "ok": true,
+    "response": {
+      "answer": "公司的标准下班时间是18:00。\n\n参考来源：\n[员工考勤管理制度-2026版 > 员工考勤管理制度（2026年版） > 第二章 工作时间]",
+      "references": [
+        {
+          "doc_id": "doc_20260911115039_21cb39084ccd",
+          "doc_version": "v1.0",
+          "doc_title": "员工考勤管理制度-2026版",
+          "title_path": "员工考勤管理制度（2026年版） > 第二章 工作时间",
+          "chunk_index": 4,
+          "score": 0.23675443520387893
+        }
+      ],
+      "is_low_confidence": false
+    },
+    "elapsed_ms": 1500.0606250250712,
+    "finished_monotonic": 679937.96499075
+  }
+]

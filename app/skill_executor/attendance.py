@@ -8,7 +8,7 @@ import calendar
 
 from app.models.attendance import Attendance
 from app.skill_executor.base import BaseSkillExecutor, SkillResult
-from app.models.scheme.skill_context import SkillContext
+from app.schemas.scheme.skill_context import SkillContext
 
 log = logging.getLogger(__name__)
 

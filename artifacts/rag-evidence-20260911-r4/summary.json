@@ -1,0 +1,24 @@
+{
+  "samples": 80,
+  "errors": 1,
+  "at_or_over_5s": 0,
+  "p50_ms": 1754.5970829669386,
+  "p95_ms": 2922.6322500035167,
+  "p99_ms": 4205.037040985189,
+  "max_ms": 4205.037040985189,
+  "generation_calls": 74,
+  "cache_observations": 80,
+  "cache_hits": 0,
+  "answered_of_60": 59,
+  "abstained_of_20": 20,
+  "source_unchanged": true,
+  "errors_100": [
+    "A40",
+    "P02",
+    "P01",
+    "P03",
+    "P04",
+    "P05"
+  ],
+  "logs_matching": 100
+}

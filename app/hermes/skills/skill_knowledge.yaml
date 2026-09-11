@@ -1,6 +1,6 @@
 name: policy_query
 display_name: "查询制度"
-description: "检索公司规章制度、操作手册、常见问题等知识文档，支持按分类和权限过滤"
+description: "根据企业知识库回答规章制度、操作手册和常见问题"
 triggers:
   - "制度"
   - "规定"
@@ -16,19 +16,5 @@ slots:
     type: string
     required: true
     default: null
-    follow_up_prompt: "请问你想查询哪方面的制度或资料？"
-    description: "用户想查询的制度主题关键词，用于匹配 t_document.title"
-  - name: category
-    type: string
-    required: false
-    default: null
-    follow_up_prompt: "需要限定文档分类吗？（政策/手册/常见问题/培训）"
-    description: "文档分类，对应 t_document.category"
-    enum: ["政策", "手册", "常见问题", "培训"]
-  - name: file_type
-    type: string
-    required: false
-    default: null
-    follow_up_prompt: "对文件格式有要求吗？（pdf/docx/md/pptx）"
-    description: "文件格式偏好，对应 t_document.file_type"
-    enum: ["pdf", "docx", "md", "pptx"]
+    follow_up_prompt: "请提供你要查询的具体问题。"
+    description: "用户的完整知识查询问题，保留原话中的条件、数字和限制，不要压缩为关键词"

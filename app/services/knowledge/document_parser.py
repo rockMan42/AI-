@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 
 from app.services.knowledge.base_parser import DocumentParser
+from app.services.knowledge.semantic_chunker import SemanticChunker
 from app.services.knowledge.document_types import Chunk, Section
 from app.services.knowledge.pdf_parser import PDFParser
 from app.services.knowledge.word_parser import WordParser
@@ -37,6 +38,9 @@ async def parse_and_chunk(
     document_title: str = "",
     *,
     token_encoding: str = "cl100k_base",
+    target_tokens: int = 384,
+    max_tokens: int = 512,
+    min_tokens: int = 50,
     ocr_enabled: bool = True,
     ocr_language: str = "chi_sim+eng",
     ocr_dpi: int = 200,
@@ -51,6 +55,8 @@ async def parse_and_chunk(
         ocr_dpi=ocr_dpi,
         ocr_min_chars=ocr_min_chars,
     )
+    parser.chunker = SemanticChunker(encoding_name=token_encoding, target_tokens=target_tokens,
+                                     max_tokens=max_tokens, min_tokens=min_tokens)
     sections = await asyncio.to_thread(parser.parse, file_path)
     return await asyncio.to_thread(
         parser.chunk_sections,

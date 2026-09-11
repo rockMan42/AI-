@@ -3,4 +3,13 @@ skills_dirs:
 tools_dirs:
   - "app/hermes/tools"  # 自定义工具目录
 mcp_servers:
-  - "app/hermes/mcp"  # MCP 服务器配置目录
+  enterprise_knowledge_mcp:
+    command: python
+    args:
+      - "-m"
+      - "app.hermes.mcp.knowledge_mcp_server"
+    connect_timeout: 60
+    timeout: 10
+    tools:
+      include:
+        - knowledge_search

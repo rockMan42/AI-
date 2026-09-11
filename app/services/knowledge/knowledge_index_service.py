@@ -8,13 +8,17 @@ from sqlalchemy.sql.elements import and_
 from app.utils.time import utc_now
 from app.config.settings import Settings
 from app.core.database import create_session
-from app.core.embedding_client import embed_texts
+from app.core.embedding_client import embed_texts, init_embedding
+from app.core.rag_context import phase
 from app.core.milvus_client import (
     deactivate_old_versions,
     delete_version_vectors,
     insert_vectors,
     search_vectors,
+    search_keywords,
 )
+
+from app.security.auth import search_permission_levels
 from app.models import KnowledgeDocument, KnowledgeChunk
 from app.models.user import User
 from app.security.auth import accessible_permission_level
@@ -331,7 +335,7 @@ async def _process_documents(document_id: int, settings: Settings) -> None:
                 chunk.is_active = is_latest_version
 
             document.status = "embedded"
-            document.embedded_at = utc.now()
+            document.embedded_at = utc_now()
             document.embedding_started_at = None
             document.error_message = None
 
@@ -366,45 +370,54 @@ def _validate_milvus_fields(
     }
 
     for field_name, (value, max_length) in fields.items():
-        if len(value) > max_length:
+        if len(value.encode("utf-8")) > max_length:
             raise ValueError(
                 f"{field_name}超过Milvus限制{max_length}"
             )
 
 async def search_knowledge(
-        *,
-        query: str,
-        user: User,
-        settings: Settings,
-        limit: int = 10,
-        doc_id: str | None = None
+    *,
+    query: str,
+    user: User,
+    settings: Settings,
+    limit: int = 10,
+    doc_id: str | None = None,
+    permission_level: str | None = None,
 ):
+    allowed_permissions = await search_permission_levels(
+        user,
+        permission_level,
+    )
 
-    allowed_permissions = await accessible_permission_level(user)
-    vectors = await (embed_texts([query],settings))
-    if not vectors:
-        raise RuntimeError("向量化失败")
-    query_vector = vectors[0]
+    async def dense():
+        client = await init_embedding(settings)
+        vector = await client.embed_query(query)
+        with phase("milvus_dense"):
+            return await search_vectors(
+                query_vector=vector, allowed_permissions=allowed_permissions,
+                limit=limit, search_ef=max(settings.milvus_search_ef, limit),
+                doc_id=doc_id,
+            )
 
-    hits = await search_vectors(query_vector=query_vector,
-                                  allowed_permissions=allowed_permissions,
-                                  limit=limit,
-                                  search_ef=settings.milvus_search_ef,
-                                  doc_id=doc_id)
+    async def sparse():
+        with phase("milvus_bm25"):
+            return await search_keywords(query, allowed_permissions=allowed_permissions,
+                                         limit=limit, doc_id=doc_id)
 
-    return [
-        {
-            "id": int(hit["id"]),
-            "score": float(
-                hit.get(
-                    "distance",
-                    hit.get("score", 0.0),
-                )
-            ),
-            **hit.get("entity", {}),
-        }
-        for hit in hits
-    ]
+    # TaskGroup 在任一路失败时取消另一条路，底层 SDK 另有剩余预算超时。
+    async with asyncio.TaskGroup() as group:
+        dense_task = group.create_task(dense())
+        sparse_task = (group.create_task(sparse())
+                       if settings.knowledge_retrieval_mode == "hybrid" else None)
+
+    result = []
+    for route, task in (("dense", dense_task), ("bm25", sparse_task)):
+        if task is None:
+            continue
+        for rank, hit in enumerate(task.result(), 1):
+            result.append({**hit.get("entity", {}), "id": int(hit["id"]),
+                           "route": route, "rank": rank})
+    return result
 
 
 async def start_embedding_worker(
@@ -413,7 +426,8 @@ async def start_embedding_worker(
     global _worker, _stop_event
 
     if (
-        not settings.knowledge_embedding_worker_enabled
+        settings.knowledge_maintenance
+        or not settings.knowledge_embedding_worker_enabled
         or _worker is not None
     ):
         return

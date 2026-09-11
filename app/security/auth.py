@@ -13,9 +13,20 @@ from app.models.user import User
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
-ADMIN_ROlES = {"admin","管理员"}
+
+
+
+ADMIN_ROLES = {"admin","管理员"}
 ACTIVE_STATUSES = {"active", "活跃", "活动"}
-INTERNAL_ROLES = ADMIN_ROlES | {"manager","经理","employee","员工"}
+INTERNAL_ROLES = ADMIN_ROLES | {"manager","经理","employee","员工"}
+
+MANAGEMENT_ROLES = ADMIN_ROLES | {"manager", "经理"}
+
+PERMISSION_SCOPES = {
+    "public": ("public",),
+    "internal": ("public", "internal"),
+    "confidential": ("public", "internal", "confidential"),
+}
 
 
 async def get_current_user(
@@ -81,7 +92,7 @@ async def require_admin(user: Annotated[
     User,Depends(get_current_user)
 ]) -> User:
 
-    if user.role not in ADMIN_ROlES:
+    if user.role not in ADMIN_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="仅管理员可执行操作"
@@ -89,10 +100,34 @@ async def require_admin(user: Annotated[
     return user
 
 async def accessible_permission_level(user: User) -> tuple[str,...]:
-    if user.role in ADMIN_ROlES:
-        return "public","internal","confidential"
+    if user.role in MANAGEMENT_ROLES:
+        return PERMISSION_SCOPES["confidential"]
 
     if user.role in INTERNAL_ROLES:
-        return "public","internal"
+        return PERMISSION_SCOPES["internal"]
 
-    return ("public",)
+    return PERMISSION_SCOPES["public"]
+
+
+async def search_permission_levels(
+        user: User,
+        permission_level: str | None
+) -> tuple[str,...]:
+
+    if user.status not in ACTIVE_STATUSES:
+        raise PermissionError("用户已停用")
+
+    allowed = await accessible_permission_level(user)
+
+    if permission_level is None:
+        return allowed
+
+    if permission_level not in PERMISSION_SCOPES:
+        raise PermissionError("无效的权限级别")
+
+    if permission_level not in allowed:
+        raise PermissionError("用户无权限访问")
+
+    requested = PERMISSION_SCOPES[permission_level]
+
+    return tuple(level for level in requested if level in allowed)

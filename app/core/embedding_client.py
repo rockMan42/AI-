@@ -1,12 +1,17 @@
 import asyncio
 import logging
 import random
+import hashlib
+import hmac
+import json
+import math
 
 import httpx
 import tiktoken
-from sqlalchemy import Sequence
-
+import redis.asyncio as redis
+from collections.abc import Sequence
 from app.config.settings import Settings
+from app.core.rag_context import phase, remaining_seconds
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +37,14 @@ class EmbeddingClient:
         self._max_tokes = settings.embedding_max_tokens
         self._max_retries = settings.embedding_max_retries
         self._backoff_seconds = settings.embedding_backoff_seconds
+        self._settings = settings
+        self._cache = None
+        if settings.query_embedding_cache_enabled and settings.redis_url:
+            self._cache = redis.from_url(
+                settings.redis_url, decode_responses=True,
+                socket_connect_timeout=settings.query_embedding_cache_timeout_seconds,
+                socket_timeout=settings.query_embedding_cache_timeout_seconds,
+            )
 
         self._encoding = tiktoken.get_encoding(settings.knowledge_token_encoding)
         self._client = httpx.AsyncClient(
@@ -41,6 +54,50 @@ class EmbeddingClient:
 
     async def close(self) -> None:
         await self._client.aclose()
+        if self._cache is not None:
+            await self._cache.aclose()
+
+    async def embed_query(self, query: str) -> list[float]:
+        """在线查询单次请求；缓存故障不影响原始向量化。"""
+        query = self._validate_text(query)
+        material = json.dumps(["query-v1", self._model, self._dimension, query],
+                              ensure_ascii=False).encode()
+        key = "dep:kb:embedding:" + hmac.new(
+            self._settings.knowledge_log_key.get_secret_value().encode(),
+            material, hashlib.sha256,
+        ).hexdigest()
+        cached = await self._cache_command("get", key)
+        if cached:
+            try:
+                vector = json.loads(cached)
+                if self._valid_vector(vector):
+                    with phase("embedding", cache_hit=True, model=self._model):
+                        return vector
+            except (TypeError, ValueError):
+                pass
+
+        with phase("embedding", cache_hit=False, model=self._model):
+            vector = (await self._request_with_retry([query], online=True))[0]
+        await self._cache_command("set", key, json.dumps(vector),
+                                  ex=self._settings.query_embedding_cache_ttl)
+        return vector
+
+    async def _cache_command(self, command, *args, **kwargs):
+        if self._cache is None:
+            return None
+        try:
+            async with asyncio.timeout(remaining_seconds(
+                self._settings.query_embedding_cache_timeout_seconds
+            )):
+                return await getattr(self._cache, command)(*args, **kwargs)
+        except (redis.RedisError, TimeoutError, OSError):
+            with phase("embedding_cache", available=False):
+                return None
+
+    def _valid_vector(self, vector) -> bool:
+        return (isinstance(vector, list) and len(vector) == self._dimension
+                and all(type(value) in (int, float) and math.isfinite(value)
+                        for value in vector))
 
     async def embed_texts(self,
                           texts: Sequence[str]) -> list[list[float]]:
@@ -73,11 +130,16 @@ class EmbeddingClient:
         return normalized
 
     # 带重试的请求
-    async def _request_with_retry(self,texts: list[str]) -> list[list[float]]:
-        try:
-            for attempt in range(0,self._max_retries + 1):
+    async def _request_with_retry(self, texts: list[str], *, online=False) -> list[list[float]]:
+        retries = 0 if online else self._max_retries
+        for attempt in range(0, retries + 1):
+            try:
+                # 临时排查：完整密钥会写入日志，排查完成后移除此日志。
+                log.info("dashscope_request model=%s api_key=%s", self._model, self._api_key)
                 response = await self._client.post(
                     self._endpoint,
+                    timeout=remaining_seconds(self._settings.embedding_timeout_seconds)
+                    if online else self._settings.embedding_timeout_seconds,
                     headers={
                         "Authorization": f"Bearer {self._api_key}",
                         "Content-Type": "application/json",
@@ -90,19 +152,19 @@ class EmbeddingClient:
                     },
                 )
 
-                if response.status_code in _RETRYABLE_STATUS_CODES and attempt < self._max_retries:
+                if response.status_code in _RETRYABLE_STATUS_CODES and attempt < retries:
                     await self._wait_before_retry(response,attempt)
                     continue
 
                 response.raise_for_status()
                 return self._parse_response(response,len(texts))
-        except(httpx.TimeoutException,
-               httpx.NetworkError) as exec:
-            if attempt >= self._max_retries:
-                raise EmbeddingError("Embedding服务网络调用失败") from exec
-            await self._wait_before_retry(response, attempt)
-        except httpx.HTTPStatusError as exec:
-            raise EmbeddingError(f"Embedding服务返回HTTP{exec.response.status_code}") from exec
+            except(httpx.TimeoutException,
+                   httpx.NetworkError) as exec:
+                if attempt >= retries:
+                    raise EmbeddingError("Embedding服务网络调用失败") from exec
+                await self._wait_before_retry(None, attempt)
+            except httpx.HTTPStatusError as exec:
+                raise EmbeddingError(f"Embedding服务返回HTTP{exec.response.status_code}") from exec
 
         raise EmbeddingError("Embedding服务调用失败")
 
@@ -111,7 +173,7 @@ class EmbeddingClient:
         retry_after: float = 0.0
 
         if response is not None:
-            raw_retry_after = response.headers.get("Retry_After")
+            raw_retry_after = response.headers.get("Retry-After")
             if raw_retry_after:
                 try:
                     retry_after = float(raw_retry_after)
@@ -147,13 +209,16 @@ class EmbeddingClient:
             raise EmbeddingError("Embedding返回的数量不匹配")
 
         if any(
-            not isinstance(vectors,list)
-            or
-            len(vector) != self._dimension
+            not self._valid_vector(vector)
             for vector in vectors
         ):
             raise EmbeddingError("Embedding返回的维度不匹配")
 
+        usage = payload.get("usage", {})
+        if isinstance(usage, dict):
+            with phase("embedding_usage", model=self._model,
+                       total_tokens=usage.get("total_tokens")):
+                pass
         return vectors
 
 _embedding_client: EmbeddingClient | None = None
@@ -180,12 +245,10 @@ async def close_embedding() -> None:
 async def embed_texts(
         texts: Sequence[str],
         settings: Settings
-) -> list[list[str]]:
+) -> list[list[float]]:
 
     # 初始化向量化客户端
     client = await init_embedding(settings)
 
     # 调用向量化接口
     return await client.embed_texts(texts)
-
-

@@ -1,5 +1,6 @@
 
 from typing import Annotated
+from fastapi import Request
 
 from fastapi import APIRouter, status, UploadFile, File, Form, Depends, HTTPException
 from fastapi.params import Query
@@ -7,20 +8,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config.settings import Settings, get_settings
 from app.core.clamav_client import VirusScannerUnavailableError, VirusFoundError
 from app.core.database import get_session
-from app.models.scheme import knowledge
-from app.models.scheme.knowledge import (
+from app.core.rag_client import RAGError
+from app.schemas.scheme.knowledge import (
     ChunkListResponse,
     DocumentResponse,
-    PermissionLevel,
+    PermissionLevel, KnowledgeSearchRequest, KnowledgeSearchResponse,
 )
 from app.core.milvus_client import get_collection_status
-from app.models.scheme.knowledge import (
+from app.schemas.scheme.knowledge import (
     CollectionStatusResponse,
     EmbedRequest,
     EmbedResponse,
 )
 from app.services.knowledge.knowledge_index_service import (
-    DocumentEmbeddingNotFoundError,
     DocumentNotReadyError,
     request_document_embedding, DocumentNotEmbeddingError,
 )
@@ -29,9 +29,16 @@ from app.security.auth import require_admin, get_current_user
 from app.services.knowledge.document_service import create_document, DocumentProcessingError, get_document_chunks, \
     DocumentNotFoundError, delete_document
 from app.services.knowledge.file_validation import InvalidDocumentError
+from app.services.knowledge.rag_service import RAGService
 
-router = APIRouter(prefix="/knowledge/documents")
-collection_router = APIRouter(prefix="/knowledge/collection")
+async def require_knowledge_available(settings: Settings = Depends(get_settings)):
+    if settings.knowledge_maintenance:
+        raise HTTPException(status_code=503, detail="知识库维护中")
+
+
+router = APIRouter(prefix="/knowledge/documents", dependencies=[Depends(require_knowledge_available)])
+collection_router = APIRouter(prefix="/knowledge/collection", dependencies=[Depends(require_knowledge_available)])
+search_router = APIRouter(prefix="/knowledge", dependencies=[Depends(require_knowledge_available)])
 
 @router.post("/upload",response_model=DocumentResponse,status_code=status.HTTP_201_CREATED)
 async def upload_document(
@@ -174,3 +181,27 @@ async def collection_status(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Milvus Collection状态查询失败",
         ) from exc
+
+@search_router.post(
+    "/search",
+    response_model=KnowledgeSearchResponse,
+)
+async def search_knowledge_api(
+    body: KnowledgeSearchRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+) -> KnowledgeSearchResponse:
+    service: RAGService = request.app.state.rag_service
+
+    try:
+        return await service.search(body, user)
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from None
+    except RAGError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from None
