@@ -1,0 +1,32 @@
+[
+  {
+    "endpoint": "punch-records",
+    "scenario": "self",
+    "status": 200
+  },
+  {
+    "endpoint": "punch-records",
+    "scenario": "other",
+    "status": 403
+  },
+  {
+    "endpoint": "late-stats",
+    "scenario": "self",
+    "status": 200
+  },
+  {
+    "endpoint": "late-stats",
+    "scenario": "other",
+    "status": 403
+  },
+  {
+    "endpoint": "leave-balance",
+    "scenario": "self",
+    "status": 200
+  },
+  {
+    "endpoint": "leave-balance",
+    "scenario": "other",
+    "status": 403
+  }
+]

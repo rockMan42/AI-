@@ -1,0 +1,8 @@
+{
+  "command": "PYTHONPATH=. .venv/bin/python -B -m pytest -q tests/test_attendance_optimization.py tests/test_intent_client.py",
+  "passed": 54,
+  "failed": 0,
+  "live_feishu_tested": false,
+  "live_model_tested": true,
+  "regression_note": "分类改用单次无工具 JSON 请求，真实模型样本见 intent-validation.json"
+}
