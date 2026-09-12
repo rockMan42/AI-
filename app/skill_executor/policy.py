@@ -4,9 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.rag_client import RAGError
 from app.hermes.agent import call_knowledge_search
 from app.models import User
-from app.schemas.scheme.knowledge import KnowledgeSearchRequest
+from app.schemas.knowledge import KnowledgeSearchRequest
 
-from app.schemas.scheme.skill_context import SkillContext
+from app.schemas.skill_context import SkillContext
 from app.security.auth import ACTIVE_STATUSES, accessible_permission_level
 from app.skill_executor.base import BaseSkillExecutor, SkillResult
 

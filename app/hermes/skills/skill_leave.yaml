@@ -1,6 +1,9 @@
 name: leave_apply
 display_name: "请假"
-description: "处理员工请假申请，自动校验假期余额，根据审批流配置确定审批人"
+description: >
+  处理请假申请，例如“我要请年假”“申请明天休假”。
+  查询剩余年假、调休余额、病假余额不属于请假申请，
+  应路由到 attendance_query。
 triggers:
   - "请假"
   - "休假"

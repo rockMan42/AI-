@@ -1,15 +1,56 @@
 import json
+import asyncio
 from app.core.rag_context import timed
 
 import httpx
 from app.config.settings import get_settings
 from app.core.redis_client import get_cache, set_cache
 
+_client: httpx.AsyncClient | None = None
+_token_lock: asyncio.Lock | None = None
+
+
+async def init_feishu_client():
+    global _client, _token_lock
+    if _client is None:
+        _client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            timeout=httpx.Timeout(5.0, connect=1.0, pool=1.0),
+        )
+        _token_lock = asyncio.Lock()
+
+
+async def close_feishu_client():
+    global _client, _token_lock
+    client, _client = _client, None
+    _token_lock = None
+    if client is not None:
+        await client.aclose()
+
+
+def get_feishu_client():
+    if _client is None:
+        raise RuntimeError("飞书客户端尚未初始化")
+    return _client
+
+
 # 飞书 API 基础地址
 FEISHU_API_BASE = "https://open.feishu.cn/open-apis"
 access_token_key = "dep:tenant_access_token"
 
+@timed("feishu_token")
 async def _get_tenant_access_token() -> str:
+    token = await get_cache(access_token_key)
+    if token is not None:
+        return token
+    if _token_lock is None:
+        raise RuntimeError("飞书客户端尚未初始化")
+    async with _token_lock:
+        # 原函数会在锁内再次读缓存。
+        return await _fetch_tenant_access_token()
+
+
+async def _fetch_tenant_access_token() -> str:
     """获取飞书用户访问令牌（自动缓存和续期）"""
 
     # 从缓存中获取令牌
@@ -18,39 +59,42 @@ async def _get_tenant_access_token() -> str:
         return token
 
     settings = get_settings()
-    async with httpx.AsyncClient() as client:
-        res = await client.post(
-            f"{FEISHU_API_BASE}/auth/v3/tenant_access_token/internal",
-            json={
-                "app_id": settings.feishu_app_id,
-                "app_secret": settings.feishu_app_secret,
-            },
-        )
+    client = get_feishu_client()
+    res = await client.post(
+        f"{FEISHU_API_BASE}/auth/v3/tenant_access_token/internal",
+        json={
+            "app_id": settings.feishu_app_id,
+            "app_secret": settings.feishu_app_secret,
+        },
+    )
 
-        data =  res.json()
+    res.raise_for_status()
+    data = res.json()
+    if data.get("code") != 0:
+        raise RuntimeError("获取飞书令牌失败")
 
-        token = data["tenant_access_token"]
-        expire = int(data.get("expire", 7200))
+    token = data["tenant_access_token"]
+    expire = int(data.get("expire", 7200))
 
-        # 比飞书实际过期时间提前5分钟清除
-        cache_ttl = max(expire - 300, 60)
-        await set_cache(access_token_key, token, cache_ttl)
+    # 比飞书实际过期时间提前5分钟清除
+    cache_ttl = max(expire - 300, 60)
+    await set_cache(access_token_key, token, cache_ttl)
 
-        return token
+    return token
 
 @timed("feishu_send")
 async def _send_feishu_reply(message_id: str, text: str):
     """回复飞书消息（基于原消息id进行回复）"""
     token = await _get_tenant_access_token()
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/reply",
-            headers={"Authorization": f"Bearer {token}"},
-            json={
-                "content": json.dumps({"text": text}, ensure_ascii=False),
-                "msg_type": "text",
-            },
-        )
+    client = get_feishu_client()
+    resp = await client.post(
+        f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/reply",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "content": json.dumps({"text": text}, ensure_ascii=False),
+            "msg_type": "text",
+        },
+    )
 
     resp.raise_for_status()
     data = resp.json()
@@ -83,15 +127,15 @@ async def get_feishu_user_detail(feishu_open_id: str):
         f"{feishu_open_id}"
     )
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            url,
-            headers={"Authorization": f"Bearer {token}"},
-            params={"user_id_type": "open_id",
-                    "department_id_type": "department_id"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    client = get_feishu_client()
+    resp = await client.get(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        params={"user_id_type": "open_id",
+                "department_id_type": "department_id"},
+    )
+    resp.raise_for_status()
+    data = resp.json()
 
     if data.get("code") != 0:
         raise Exception(f"获取用户信息失败: {data.get('msg')}")
@@ -131,14 +175,14 @@ async def get_feishu_department_detail(
         "user_id_type": "open_id",
     }
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(
-            url,
-            headers=headers,
-            params=params,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    client = get_feishu_client()
+    resp = await client.get(
+        url,
+        headers=headers,
+        params=params,
+    )
+    resp.raise_for_status()
+    data = resp.json()
 
     if data.get("code") != 0:
         raise RuntimeError(
@@ -153,3 +197,29 @@ async def get_feishu_department_detail(
         )
 
     return department
+
+@timed("feishu_send")
+async def _send_feishu_card_reply(
+    message_id: str,
+    card: dict,
+):
+    token = await _get_tenant_access_token()
+
+    client = get_feishu_client()
+    resp = await client.post(
+        f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/reply",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "msg_type": "interactive",
+            "content": json.dumps(card, ensure_ascii=False),
+        },
+    )
+
+    resp.raise_for_status()
+    payload = resp.json()
+
+    if payload.get("code") != 0:
+        # 不把返回正文或卡片内容写入异常。
+        raise RuntimeError("飞书卡片发送失败")
+
+    return payload

@@ -1,64 +1,64 @@
-import logging
-from calendar import calendar
-from datetime import date
+import asyncio
+import json
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import calendar
+from tools.registry import registry
 
-from app.models.attendance import Attendance
-from app.skill_executor.base import BaseSkillExecutor, SkillResult
-from app.schemas.scheme.skill_context import SkillContext
+from app.schemas.skill_context import SkillContext
+from app.schemas.skill_result import SkillResult
+from app.skill_executor.base import BaseSkillExecutor
 
-log = logging.getLogger(__name__)
 
 class AttendanceSKillExecutor(BaseSkillExecutor):
+    async def executor(
+        self,
+        context: SkillContext,
+        slots: dict,
+        db: AsyncSession,
+    ) -> SkillResult:
+        if (
+            slots.get("query_target") == "other"
+            and not slots.get("target_user_id")
+        ):
+            return SkillResult(
+                success=False,
+                message="查询其他员工时，请提供其系统用户 ID。",
+            )
 
-    async def executor(self, context: SkillContext, slots: dict,  db: AsyncSession) -> SkillResult:
-        conditions = []
+        target_id = slots.get("target_user_id") or context.user_id
+        
+        arguments = {
+            "user_id": str(target_id),
+            "query_type": slots.get("query_type") or "all",
+            "month": slots.get("query_month"),
+            "query_date": slots.get("query_date"),
+            "year": slots.get("query_year"),
+            "status_filter": slots.get("status_filter"),
+        }
 
-        query_date = slots.get("query_date", None)
-        query_month = slots.get("query_month",None)
-        status_filter = slots.get("status_filter",None)
-        user_id = context.user_id
+        # dispatch 是同步入口，不能直接阻塞应用事件循环。
+        from app.hermes.tools.attendance_tool import TOOL_NAME
+        raw = await asyncio.to_thread(
+            registry.dispatch,
+            TOOL_NAME,
+            arguments,
+            actor_open_id=context.open_id,
+        )
 
-        log.info(f"查询日期:{query_date},查询月份:{query_month},状态过滤:{status_filter},用户ID:{user_id}")
-        # 构建查询条件
-        conditions.append(Attendance.user_id == user_id)
+        payload = json.loads(raw) if isinstance(raw, str) else raw
 
-        if query_date:
-            conditions.append(Attendance.date == query_date)
-        if query_month:
-            year, month = map(int,query_month.split("-"))
-            start_date = date(year, month, 1)
-            last_date = date(year,month,calendar.monthrange(year,month)[1])
-            conditions.append(Attendance.date.between(start_date, last_date))
-        if status_filter:
-            conditions.append(Attendance.status == status_filter)
-        if user_id:
-            conditions.append(Attendance.user_id == user_id)
+        if not isinstance(payload, dict):
+            return SkillResult(False, "考勤服务返回格式异常")
 
-        result = await db.execute(select(Attendance).where(*conditions))
-        log.info(f"构造条件:{conditions}")
+        if not payload.get("success"):
+            return SkillResult(
+                success=False,
+                message=payload.get("message", "考勤查询失败"),
+            )
 
-        attendances = result.scalars().all()
-
-        # attendances 是列表，没有 __dict__
-        data = [
-            {
-                "date": item.date.isoformat(),
-                "clock_in_time": item.clock_in_time.isoformat() if item.clock_in_time else None,
-                "clock_out_time": item.clock_out_time.isoformat() if item.clock_out_time else None,
-                "status": item.status,
-                "work_hours": float(item.work_hours) if item.work_hours else None,
-                "remark": item.remark,
-            }
-            for item in attendances
-        ]
-        log.info(f"查询结果:{data}")
-
-        if not data:
-            print("没有找到考勤记录")
-            return SkillResult(success=False, message="没有找到考勤记录")
-
-        return SkillResult(success=True, message="找到了您的考勤记录",data=data)
+        return SkillResult(
+            success=True,
+            message=payload["message"],
+            data=payload["data"],
+            card=payload["card"],
+        )

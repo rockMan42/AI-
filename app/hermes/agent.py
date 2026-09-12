@@ -8,13 +8,16 @@ import yaml
 from pydantic import SecretStr
 from run_agent import AIAgent
 from tools.mcp_tool import register_mcp_servers, shutdown_mcp_servers
-
+from app.hermes.tools.attendance_tool import (
+    TOOLSET as ATTENDANCE_TOOLSET,
+    register_attendance_tool,
+)
 from app.config.settings import Settings
 from app.core.rag_client import RAGError
 from app.core.rag_context import query_scope, phase
 from app.hermes.knowledge_mcp_client import KnowledgeMCPClient
 from app.models import User
-from app.schemas.scheme.knowledge import KnowledgeSearchRequest, KnowledgeSearchResponse
+from app.schemas.knowledge import KnowledgeSearchRequest, KnowledgeSearchResponse
 from app.security.knowledge import issue_identity_token
 from tools.registry import registry
 
@@ -24,19 +27,19 @@ _knowledge_client: KnowledgeMCPClient | None = None
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SERVER_NAME = "enterprise_knowledge_mcp"
 TOOL_NAME = f"mcp__{SERVER_NAME}__knowledge_search"
+AGENT_MODEL = "qwen3.8-2.4t-a95b"
+AGENT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 def _create_agent(settings: Settings) -> AIAgent:
     """创建请求级 Agent，避免并发请求共享内部会话和流状态。"""
     return AIAgent(
         provider="alibaba",
-        model="qwen3.8-27b",
+        model=AGENT_MODEL,
         api_key=settings.dashscope_api_key,
-        base_url=(
-            "https://dashscope.aliyuncs.com/"
-            "compatible-mode/v1"
-        ),
+        base_url=AGENT_BASE_URL,
         quiet_mode=True,
-        disabled_toolsets=[f"mcp-{SERVER_NAME}"]
+        disabled_toolsets=[f"mcp-{SERVER_NAME}",
+                           ATTENDANCE_TOOLSET]  # 这里禁止分类阶段自由调用考勤 Tool，由现有业务执行器在认证身份明确后调用。Tool 仍然真实注册在 Hermes registry 中，不需要新增 MCP 服务或修改 config/hermes.yaml。
         # skills_dir="app/hermes/skills",
         # tools_dir="app/hermes/tools",
         # mcp_dir="app/hermes/mcp",
@@ -48,6 +51,8 @@ async def init_hermes_agent(settings: Settings):
     global _agent_settings, _knowledge_client
 
     try:
+        # 注册 attendance tool
+        register_attendance_tool(asyncio.get_running_loop())
 
         servers = _mcp_config(settings)
         knowledge_server = servers.pop(SERVER_NAME)

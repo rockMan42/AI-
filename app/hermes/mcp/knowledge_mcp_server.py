@@ -11,7 +11,7 @@ from app.core.database import init_db, close_db, create_session
 from app.core.embedding_client import init_embedding, close_embedding
 from app.core.milvus_client import init_milvus, close_milvus
 from app.core.rag_client import RAGError
-from app.schemas.scheme.knowledge import KnowledgeSearchRequest
+from app.schemas.knowledge import KnowledgeSearchRequest
 from app.security.knowledge import resolve_identity_token, decode_identity_context
 from app.core.rag_context import query_scope, phase
 from app.services.knowledge.rag_service import RAGService

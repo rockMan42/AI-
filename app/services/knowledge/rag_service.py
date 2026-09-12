@@ -6,7 +6,7 @@ from app.config.settings import Settings
 from app.core.database import create_session
 from app.core.rag_client import RAGClient, RAGError
 from app.models import User, KnowledgeSearchLog, KnowledgeChunk, KnowledgeDocument
-from app.schemas.scheme.knowledge import KnowledgeSearchRequest, KnowledgeSearchResponse, KnowledgeReference
+from app.schemas.knowledge import KnowledgeSearchRequest, KnowledgeSearchResponse, KnowledgeReference
 from app.security.auth import search_permission_levels
 from app.security.knowledge import KnowledgeSecurity
 from app.services.knowledge.knowledge_index_service import search_knowledge

@@ -1,4 +1,4 @@
-from app.core.rag_context import phase, traced
+from app.core.rag_context import phase, traced, timed
 import asyncio
 import hashlib
 import logging
@@ -6,16 +6,25 @@ import json
 import re
 from dataclasses import asdict
 from datetime import date
-
+from app.services.conversation_engine.feishu import (
+    _send_feishu_card_reply,
+)
 from fastapi import Request, APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config.settings import get_settings
 from app.constant.intent_state import IntentState
-from app.core.database import get_session
+from app.core.database import get_session, create_session
 from app.core.redis_client import set_cache_if_absent
 from app.services.conversation_engine.conversation_manager import ConversationManager
 from app.hermes.agent import get_agent
-from app.schemas.scheme.skill_context import SkillContext
+from app.hermes.intent_client import classify_intent
+from app.services.conversation_engine.attendance_fast_path import parse_attendance_query, can_use_fast_path
+from app.services.conversation_engine.model_runner import ModelRunner
+from app.schemas.attendance import now_shanghai
+import time
+import threading
+import httpx
+from app.schemas.skill_context import SkillContext
 from app.services.conversation_engine.register_skill import SkillRegistry, get_skill_register
 from app.services.conversation_engine.session_store import SessionStore
 from app.services.conversation_engine.slot_collector import SlotCollector
@@ -61,9 +70,23 @@ INTERNAL_REPLY_MARKERS = (
 session_store = SessionStore()
 conversation_manager = ConversationManager(session_store)
 slot_collector = SlotCollector(session_store)
+model_runner = None
+
+
+async def init_model_runner():
+    global model_runner
+    model_runner = ModelRunner(settings.intent_concurrency, settings.intent_queue_timeout_seconds, settings.intent_timeout_seconds)
+
+
+async def close_model_runner():
+    global model_runner
+    runner, model_runner = model_runner, None
+    if runner is not None:
+        await runner.close()
 
 @router.post("/webhook/feishu")
 @traced
+@timed("feishu_total")
 async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session),register: SkillRegistry = Depends(get_skill_register)):
     """接受飞书事件，处理消息并调用Agent回复"""
 
@@ -103,7 +126,11 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
         content = json.loads(message.get("content", "{}"))
     except json.JSONDecodeError:
         content = {}
-    log.info(f"open_id:{open_id},text:{content.get('text', '')}")
+
+    log.info(
+        "feishu_message_received message_type=%s",
+        msg_type,
+    )
 
     # 消息去重（飞书可能重复推送同一条消息）
     dedup_key=f"dep:sess:dedup:{message_id}"
@@ -155,7 +182,10 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
         return response.success_response("Duplicate content ignored")
 
     # 获取或创建系统用户
-    user = await get_or_create_user(open_id,db)
+    with phase("feishu_user"):
+        async with create_session() as identity_db:
+            user = await get_or_create_user(open_id, identity_db)
+            identity_db.expunge(user)
     if user.status not in ACTIVE_STATUSES:
         await _send_feishu_reply(
             message_id,
@@ -170,7 +200,7 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
     # 调用 Hermes Agent 处理消息
     # task_id的主要目的是为每次对话或任务提供一个独立的、隔离的运行环境，确保任务之间的数据不相互影响
     # user_id 用于标识发送消息的用户,用户身份标识,会话管理,数据隔离（记忆）,权限控制
-    agent = get_agent()
+    agent = None
 
     retry_reply = await try_retry_failed_skill(
         session=session,
@@ -182,7 +212,11 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
         agent=agent,
     )
     if retry_reply is not None:
-        await _send_feishu_reply(message_id, clean_markdown(retry_reply))
+        await send_business_reply(
+            message_id,
+            retry_reply,
+            message.get("chat_type", ""),
+        )
         return response.success_response("飞书回复成功")
 
     pending_reply = await try_handle_pending_slot(
@@ -195,8 +229,30 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
         agent=agent,
     )
     if pending_reply is not None:
-        await _send_feishu_reply(message_id, clean_markdown(pending_reply))
+        await send_business_reply(
+            message_id,
+            pending_reply,
+            message.get("chat_type", ""),
+        )
         return response.success_response("飞书回复成功")
+
+    with phase("attendance_fast_route"):
+        parsed = (
+            parse_attendance_query(text, now_shanghai().date())
+            if settings.attendance_fast_path_enabled and can_use_fast_path(session)
+            else None
+        )
+    with phase("attendance_fast_path", hit=parsed is not None):
+        pass
+    if parsed is not None:
+        fast_route = IntentRouter(register).router(parsed, user.user_id)
+        if fast_route["action"] == "execute_skill":
+            reply = await handle_skill_action(
+                user=user, text=text, message_id=message_id,
+                router_result=fast_route, db=db, agent=None,
+            )
+            await send_business_reply(message_id, reply, message.get("chat_type", ""))
+            return response.success_response("飞书回复成功")
 
     try:
         # 开始调用大模型 LLM 正在分类意图之前保存意向状态
@@ -224,7 +280,11 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
 
         # 调用大模型进行意图分类
         with phase("feishu_intent"):
-            result = await conversation(agent, classification_input, intent_system_prompt, message_id)
+            if model_runner is None:
+                raise RuntimeError("模型执行器尚未初始化")
+            result = await model_runner.run(
+                lambda: classify_intent(settings, classification_input, intent_system_prompt)
+            )
 
     except asyncio.TimeoutError:
         log.exception("LLM 请求超时")
@@ -302,9 +362,10 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
 
 
     # 通过飞书 API 发送回复
-    await _send_feishu_reply(
+    await send_business_reply(
         message_id,
-        clean_markdown(reply_text),
+        reply_text,
+        message.get("chat_type", ""),
     )
 
     return response.success_response("飞书回复成功")
@@ -318,7 +379,7 @@ async def try_handle_pending_slot(
     register: SkillRegistry,
     db: AsyncSession,
     agent,
-) -> str | None:
+) -> str | dict | None:
     """优先消费待补槽位的明确回答，避免短回答被重新识别为意图。"""
     if not session.pending_slot:
         return None
@@ -448,7 +509,7 @@ async def handle_skill_action(
     router_result: dict,
     db: AsyncSession,
     agent,
-) -> str:
+) -> str | dict:
 
     """处理技能执行"""
     skill = router_result["skill"]
@@ -516,6 +577,7 @@ async def handle_skill_action(
             collection_result["slots"],
             db,
         )
+
         if skill_result is None:
             raise RuntimeError(
                 f"Executor {skill.name} returned None"
@@ -537,6 +599,9 @@ async def handle_skill_action(
             IntentState.SKILL_FAILED,
         )
         return "业务处理失败，请稍后重试。"
+
+    if skill_result.card is not None:
+        return skill_result.card
 
     # 知识回答不再交给 LLM 改写
     if skill.name == "policy_query":
@@ -571,22 +636,55 @@ async def conversation(
     system_message: str,
     message_id: str,
 ) -> dict:
-    if agent is None:
-        raise RuntimeError("Hermes Agent 尚未初始化")
+    if model_runner is None:
+        raise RuntimeError("模型执行器尚未初始化")
 
-    # 临时排查：打印当前 Agent 持有的密钥，排查完成后移除此日志。
-    log.info("dashscope_agent_request model=%s api_key=%s",
-             agent.model, agent.api_key)
+    cancelled = threading.Event()
+    active_agent = []
 
-    return await asyncio.wait_for(
-        asyncio.to_thread(
-            agent.run_conversation,
-            user_message=text,
-            system_message=system_message,
-            task_id=message_id,
-        ),
-        timeout=3000,
-    )
+    def interrupt():
+        cancelled.set()
+        if active_agent:
+            active_agent[0].interrupt()
+
+    def run():
+        owned = agent is None
+        with phase("agent_create"):
+            current_agent = get_agent() if owned else agent
+        if current_agent is None:
+            raise RuntimeError("Hermes Agent 尚未初始化")
+        active_agent.append(current_agent)
+        try:
+            if cancelled.is_set():
+                raise TimeoutError("模型请求已取消")
+            # Hermes 会传入自己的 timeout；在请求级 SDK 入口明确覆盖。
+            # 不修改全局 provider 配置，不共享 Agent 会话。
+            deadline = time.monotonic() + settings.intent_timeout_seconds
+            client = current_agent.client
+            original_create = client.chat.completions.create
+            def bounded_create(*args, **kwargs):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or cancelled.is_set():
+                    raise TimeoutError("模型请求预算耗尽")
+                kwargs["timeout"] = httpx.Timeout(remaining, connect=min(1.0, remaining))
+                return original_create(*args, **kwargs)
+            client.chat.completions.create = bounded_create
+            # Hermes 的计数包含首次请求：1 表示只请求一次，0 会跳过 API。
+            current_agent._api_max_retries = 1
+            try:
+                result = current_agent.run_conversation(
+                    user_message=text, system_message=system_message, task_id=message_id,
+                )
+                if not isinstance(result, dict) or not str(result.get("final_response") or "").strip():
+                    raise RuntimeError("模型未返回有效回复")
+                return result
+            finally:
+                client.chat.completions.create = original_create
+        finally:
+            if owned and current_agent.client is not None:
+                current_agent.client.close()
+
+    return await model_runner.run(run, on_timeout=interrupt)
 
 
 # 清理 Markdown 格式和 Hermes 内部诊断信息
@@ -714,6 +812,10 @@ continuation_context：
 1. 多轮续接规则优先于普通关键词匹配。
 2. 用户明确切换意图时，以新意图为准。
 3. 同时匹配多个新意图时，参考 triggers 和 priority。
+4. 查询假期剩余额度属于 attendance_query；
+   表达提交请假申请才属于 leave_apply。
+5. 查询别人但未提供明确系统用户 ID 时，
+   query_target 返回 other，不得猜测 target_user_id。
 
 输出格式：
 {{
@@ -765,3 +867,24 @@ def _build_continuation_context(
             }
 
     return context
+
+
+async def send_business_reply(
+        message_id:str,
+        reply: str | dict,
+        chat_type: str
+) -> None:
+    if isinstance(reply,dict):
+        if chat_type != "p2p":
+            await _send_feishu_reply(
+                message_id,
+                "考勤信息涉及个人数据，请在与机器人的私聊中查询。"
+            )
+            return
+
+        await _send_feishu_card_reply(
+            message_id,reply
+        )
+        return
+
+    await _send_feishu_reply(message_id,clean_markdown(reply))

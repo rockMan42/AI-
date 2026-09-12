@@ -55,7 +55,7 @@ def phase(name: str, **fields):
     started = time.perf_counter()
     outcome = "ok"
     try:
-        yield
+        yield fields
     except BaseException:
         outcome = "error"
         raise
@@ -80,7 +80,7 @@ def timed(name):
 def traced(function):
     @wraps(function)
     async def wrapped(*args, **kwargs):
-        token = _trace.set(uuid4().hex)
+        token = _trace.set(_trace.get() or uuid4().hex)
         try:
             return await function(*args, **kwargs)
         finally:

@@ -7,3 +7,4 @@ class SkillResult:
     success: bool
     message: str
     data: dict = field(default_factory=dict)
+    card: dict | None = None

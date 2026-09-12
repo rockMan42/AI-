@@ -9,13 +9,13 @@ from app.config.settings import Settings, get_settings
 from app.core.clamav_client import VirusScannerUnavailableError, VirusFoundError
 from app.core.database import get_session
 from app.core.rag_client import RAGError
-from app.schemas.scheme.knowledge import (
+from app.schemas.knowledge import (
     ChunkListResponse,
     DocumentResponse,
     PermissionLevel, KnowledgeSearchRequest, KnowledgeSearchResponse,
 )
 from app.core.milvus_client import get_collection_status
-from app.schemas.scheme.knowledge import (
+from app.schemas.knowledge import (
     CollectionStatusResponse,
     EmbedRequest,
     EmbedResponse,

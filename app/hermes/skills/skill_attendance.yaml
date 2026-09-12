@@ -1,6 +1,9 @@
 name: attendance_query
 display_name: "查询考勤"
-description: "查询员工个人考勤打卡记录、工时统计、异常状态，支持按日/按月查询"
+description: >
+  查询考勤打卡、月度迟到早退次数、假期剩余额度。
+  “年假还剩多少”“调休余额”属于本意图；
+  “我要请年假”“申请休假”属于 leave_apply。
 triggers:
   - "考勤"
   - "打卡"
@@ -8,25 +11,60 @@ triggers:
   - "迟到"
   - "早退"
   - "缺勤"
-  - "工时"
+  - "假期余额"
+  - "年假余额"
+  - "剩余年假"
+  - "调休余额"
 priority: 10
 slots:
-  - name: query_date
-    type: date
+  - name: query_type
+    type: string
     required: false
-    default: "today"
-    follow_up_prompt: "请问你要查询哪一天的考勤？（如不填写则默认查询今天）"
-    description: "查询具体日期（格式：2025-08-18），对应 t_attendance.date，不填默认今天（例如：2025-08-18）"
+    default: all
+    description: >
+      打卡明细为 punch_record；迟到早退次数为 late_count；
+      假期剩余额度为 leave_balance；综合查询为 all。
+    enum: ["punch_record", "late_count", "leave_balance", "all"]
+
   - name: query_month
     type: string
     required: false
     default: null
-    follow_up_prompt: "请问你要查询哪个月份的考勤？（如2025-08）"
-    description: "查询月份（格式：2025-08），用于查询 t_attendance 月度汇总"
+    description: "查询月份，YYYY-MM；按当前日期解析本月、上月。不填默认当月。"
+
+  - name: query_date
+    type: date
+    required: false
+    default: null
+    description: "仅用户明确询问某一天时填写 YYYY-MM-DD，只筛选打卡明细。"
+
   - name: status_filter
     type: string
     required: false
     default: null
-    follow_up_prompt: "需要筛选哪种考勤状态？（正常/迟到/早退/缺勤/请假）"
-    description: "按状态筛选，对应 t_attendance.status"
+    description: "仅筛选打卡明细的状态；统计迟到次数时无需填写。"
     enum: ["正常", "迟到", "早退", "缺勤", "请假"]
+
+  - name: query_target
+    type: string
+    required: false
+    default: self
+    description: "查询本人为 self，明确查询其他员工为 other。"
+    enum: ["self", "other"]
+
+  - name: target_user_id
+    type: string
+    required: false
+    default: null
+    description: >
+      查询其他员工时明确提供的系统用户数字 ID；
+      不是飞书 open_id，不得根据姓名猜测，不填默认本人。
+  - name: query_year
+    type: integer
+    required: false
+    default: null
+    description: >
+      假期余额所属年度，输出四位年份。
+      例如“25年的假期余额”提取为2025，“2026年”提取为2026；
+      “去年”“今年”根据当前日期换算。
+      未指定年度时不填写，不要为了表达年份虚构查询月份。

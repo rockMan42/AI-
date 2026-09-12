@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.scheme.skill_context import SkillContext
+from app.schemas.skill_context import SkillContext
 from app.skill_executor.base import BaseSkillExecutor, SkillResult
 
 
