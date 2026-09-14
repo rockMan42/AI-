@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from sqlalchemy import JSON
 
 from sqlalchemy import (
     BigInteger,
@@ -62,7 +63,7 @@ class LeaveRequest(Base):
         Numeric(4, 1), nullable=False, comment="时长（天）"
     )
     reason: Mapped[str | None] = mapped_column(
-        String(500), nullable=True, comment="请假原因"
+        String(1024), nullable=True, comment="请假原因",
     )
     status: Mapped[str] = mapped_column(
         String(20),
@@ -86,4 +87,27 @@ class LeaveRequest(Base):
         server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         onupdate=func.current_timestamp(),
         comment="更新时间",
+    )
+    # 历史数据允许为空；新流程创建的申请必须填写。
+    request_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True,
+        comment="申请业务编号",
+    )
+    draft_id: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, unique=True,
+        comment="来源确认草稿，用于提交幂等",
+    )
+    year_days: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True,
+        comment="各年度扣减天数快照",
+    )
+    approve_time: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True,
+    )
+    reject_reason: Mapped[str | None] = mapped_column(
+        String(512), nullable=True,
+    )
+    escalated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True,
+        comment="首次升级时间；升级不改变pending状态",
     )

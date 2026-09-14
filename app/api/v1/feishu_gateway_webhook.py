@@ -9,6 +9,11 @@ from datetime import date
 from app.services.conversation_engine.feishu import (
     _send_feishu_card_reply,
 )
+from pydantic import ValidationError
+
+from app.security.feishu_event import decode_feishu_event
+from app.services.attendance.leave_chat import handle_leave_command
+from app.services.attendance.leave_service import LeaveError
 from fastapi import Request, APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config.settings import get_settings
@@ -92,28 +97,14 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
 
     # 1. 获取飞书发送的原始 JSON 数据
     global token
-    data = await request.json()
 
+    data = await decode_feishu_event(request)
 
-    # 2. 处理 URL 验证 (challenge)
-    # 当飞书配置回调地址时，会发送一个 type 为 "url_verification" 的请求
-    # 另外一个情况：当飞书发送“你好”产生的是 im.message.receive_v1，同样带有 encrypt，但解密后只有 schema/header/event，没有 challenge。
-    if data.get("encrypt"):
-        encrypt_key = settings.encrypt_key
-        aes_cipher =  AESCipher(encrypt_key)
-        decrypt_string = aes_cipher.decrypt_string(data["encrypt"])
-        data = json.loads(decrypt_string)
-
-    # 处理 URL 验证 (challenge) 区分普通消息和 URL 验证
     if data.get("type") == "url_verification":
         return {"challenge": data["challenge"]}
 
-
-    # 3. 处理正常的事件消息 (例如 im.message.receive_v1)
-    # 签名校验（防伪造请求）
-    token = data.get("header").get("token")
-    if not await _verify_signature(token, settings.feishu_verification_token):
-        return {"code": 403, "msg": "Signature verification failed"}
+    if (data.get("header") or {}).get("event_type") != "im.message.receive_v1":
+        return response.success_response("事件类型已忽略")
 
     # 提取消息
     event = data.get("event", {})
@@ -152,6 +143,13 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
     if msg_type != "text":
         log.info(f"非文本消息,忽略消息")
         return response.success_response("Only text messages are allowed")
+
+    if message.get("chat_type") != "p2p":
+        await _send_feishu_reply(
+            message_id,
+            "业务信息涉及个人数据，请在与机器人的私聊中操作。",
+        )
+        return response.success_response("Private chat required")
 
     text = str(content.get("text", "")).strip()
     if judge_input_length(text,message_id):
@@ -193,9 +191,40 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
         )
         return response.success_response("User disabled")
 
+    try:
+        leave_reply = await handle_leave_command(
+            user.feishu_open_id,
+            text,
+        )
+    except LeaveError as exc:
+        leave_reply = str(exc)
+    except ValidationError:
+        leave_reply = "拒绝原因不能为空，且不能超过512字。"
+    except Exception as exc:
+        log.error(
+            "leave_command_failed error_type=%s",
+            type(exc).__name__,
+        )
+        leave_reply = "请假服务暂不可用，请稍后重试。"
+
+    if leave_reply is not None:
+        await send_business_reply(message_id, leave_reply, "p2p")
+        return response.success_response("请假命令已处理")
+
     # 收到消息 等待意图识别
     session_id = str(user.user_id)
     session = await conversation_manager.update_intent_state(session_id,user.user_id,IntentState.INTENT_PENDING)
+
+    if (
+        session.intent_code == "leave_apply"
+        and session.status == "awaiting_confirmation"
+        and text.strip() in {"确认", "确认提交", "取消"}
+    ):
+        await _send_feishu_reply(
+            message_id,
+            "请点击上一张确认卡片中的“确认提交”或“取消”按钮。",
+        )
+        return response.success_response("Waiting for card action")
 
     # 调用 Hermes Agent 处理消息
     # task_id的主要目的是为每次对话或任务提供一个独立的、隔离的运行环境，确保任务之间的数据不相互影响
@@ -588,6 +617,18 @@ async def handle_skill_action(
                 IntentState.SKILL_FAILED,
             )
             return skill_result.message
+
+        if (
+            skill.name == "leave_apply"
+            and skill_result.data.get("awaiting_confirmation")
+        ):
+            session.status = "awaiting_confirmation"
+            session.state = IntentState.INTENT_MATCHED.value
+            session.workflow_state = IntentState.INTENT_MATCHED.value
+            session.pending_slot = None
+            await session_store.save(session)
+            return skill_result.card
+
         await conversation_manager.update_workflow_state(
             session.session_id,
             IntentState.SKILL_COMPLETED,
@@ -604,7 +645,7 @@ async def handle_skill_action(
         return skill_result.card
 
     # 知识回答不再交给 LLM 改写
-    if skill.name == "policy_query":
+    if skill.name in {"policy_query", "leave_apply"}:
         return skill_result.message
 
     prompt = (
@@ -620,9 +661,12 @@ async def handle_skill_action(
             REPLY_SYSTEM_MESSAGE,
             message_id,
         )
-    except Exception:
-        log.exception("技能结果回复生成失败")
-        return skill_result.message
+    except Exception as exc:
+        log.error(
+            "Executor failed skill=%s error_type=%s",
+            skill.name,
+            type(exc).__name__,
+        )
 
     return clean_markdown(
         result.get("final_response", ""),

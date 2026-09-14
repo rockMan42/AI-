@@ -3,7 +3,9 @@ from app.core.rag_context import phase, timed
 
 from pydantic import ValidationError
 from redis import RedisError
-
+from app.services.attendance.leave_balance_repository import (
+    leave_balance_statement,
+)
 from app.core.database import create_session
 from app.core import redis_client as redis_module
 from app.models.attendance import Attendance
@@ -230,11 +232,7 @@ class AttendanceService:
             year: int,
     ) -> list[dict]:
         """查询用户假期余额"""
-        statement = select(LeaveBalance).where(
-            LeaveBalance.user_id == user_id,
-            LeaveBalance.year == year,
-            LeaveBalance.leave_type.in_(tuple(LEAVE_LABELS)),
-        )
+        statement = leave_balance_statement(user_id,year,tuple(LEAVE_LABELS))
 
         async with self.session_factory() as db:
             with phase("attendance_pool_acquire"):

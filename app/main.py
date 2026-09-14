@@ -15,6 +15,11 @@ from app.services.knowledge.document_cleanup import (
     start_cleanup_worker,
     stop_cleanup_worker,
 )
+from app.api.v1 import leave, feishu_leave
+from app.services.attendance.leave_notifications import (
+    start_leave_notification_worker,
+    stop_leave_notification_worker,
+)
 from app.api.v1 import attendance
 from app.core.embedding_client import (
     close_embedding,
@@ -66,6 +71,8 @@ async def lifespan(app: FastAPI):
         await start_cleanup_worker(settings)
         stack.push_async_callback(stop_cleanup_worker)
 
+        await start_leave_notification_worker()
+        stack.push_async_callback(stop_leave_notification_worker)
         yield
 
 settings = get_settings()
@@ -79,6 +86,8 @@ app.include_router(knowledge.router, prefix=f"{settings.app_prefix}", tags=["kno
 app.include_router(knowledge.collection_router, prefix=f"{settings.app_prefix}", tags=["knowledge"])
 app.include_router(knowledge.search_router, prefix=settings.app_prefix, tags=["knowledge"],)
 app.include_router(attendance.router, prefix=settings.app_prefix, tags=["attendance"],)
+app.include_router(leave.router,prefix=settings.app_prefix,tags=["leave"],)
+app.include_router(feishu_leave.router, prefix=settings.app_prefix, tags=["feishu_leave"],)
 
 # 应用启动时注册skill
 register = get_skill_register()
