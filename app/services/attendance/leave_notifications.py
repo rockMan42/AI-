@@ -17,6 +17,7 @@ from app.services.conversation_engine.feishu import (
     FEISHU_API_BASE,
     _get_tenant_access_token,
     get_feishu_client,
+    wait_feishu_send_slot,
 )
 from app.utils.time import as_shanghai, utc_now
 
@@ -190,6 +191,7 @@ async def deliver_notifications(limit: int = 100) -> None:
         try:
             async with asyncio.timeout(15):
                 token = await _get_tenant_access_token()
+                await wait_feishu_send_slot()
                 response = await get_feishu_client().post(
                     f"{FEISHU_API_BASE}/im/v1/messages",
                     params={"receive_id_type": "open_id"},

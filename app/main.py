@@ -15,6 +15,11 @@ from app.services.knowledge.document_cleanup import (
     start_cleanup_worker,
     stop_cleanup_worker,
 )
+from app.api.v1 import holiday
+from app.services.holiday_cron import (
+    start_holiday_worker,
+    stop_holiday_worker,
+)
 from app.api.v1 import leave, feishu_leave
 from app.services.attendance.leave_notifications import (
     start_leave_notification_worker,
@@ -73,6 +78,9 @@ async def lifespan(app: FastAPI):
 
         await start_leave_notification_worker()
         stack.push_async_callback(stop_leave_notification_worker)
+
+        await start_holiday_worker()
+        stack.push_async_callback(stop_holiday_worker)
         yield
 
 settings = get_settings()
@@ -88,6 +96,7 @@ app.include_router(knowledge.search_router, prefix=settings.app_prefix, tags=["k
 app.include_router(attendance.router, prefix=settings.app_prefix, tags=["attendance"],)
 app.include_router(leave.router,prefix=settings.app_prefix,tags=["leave"],)
 app.include_router(feishu_leave.router, prefix=settings.app_prefix, tags=["feishu_leave"],)
+app.include_router( holiday.router, prefix=settings.app_prefix, tags=["holiday"],)
 
 # 应用启动时注册skill
 register = get_skill_register()

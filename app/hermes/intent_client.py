@@ -8,7 +8,14 @@ from app.core.rag_context import phase
 from app.hermes.agent import AGENT_MODEL, AGENT_BASE_URL
 
 
-def classify_intent(settings, user_message: str, system_message: str) -> dict:
+def classify_intent(
+    settings,
+    user_message: str,
+    system_message: str,
+    *,
+    model: str | None = None,
+    max_tokens: int = 512,
+) -> dict:
     with OpenAI(
         api_key=settings.dashscope_api_key,
         base_url=AGENT_BASE_URL,
@@ -17,14 +24,14 @@ def classify_intent(settings, user_message: str, system_message: str) -> dict:
     ) as client:
         with phase("intent_completion") as metrics:
             response = client.chat.completions.create(
-                model=AGENT_MODEL,
+                model=model or AGENT_MODEL,
                 messages=[
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": user_message},
                 ],
                 response_format={"type": "json_object"},
                 stream=False,
-                max_tokens=512,
+                max_tokens=max_tokens,
             )
             if response.usage is not None:
                 metrics["input_tokens"] = response.usage.prompt_tokens

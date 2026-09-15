@@ -1,0 +1,64 @@
+name: holiday_notice_create
+display_name: "录入节假日通知"
+description: >
+  管理员录入公司统一放假、调休、补班和值班安排。
+  收集完整信息后生成确认卡片，点击确认才创建通知。
+  公司统一放假不同于个人请假；查询通知发送或确认情况属于 holiday_notice_query。
+triggers:
+  - "录入放假"
+  - "放假安排"
+  - "放假通知"
+  - "补班安排"
+priority: 20
+slots:
+  - name: holiday_name
+    type: string
+    required: true
+    description: "节假日名称，例如五一、国庆、中秋"
+    follow_up_prompt: "请问录入哪个节假日的放假安排？"
+
+  - name: start_date
+    type: date
+    required: true
+    description: "放假开始日期，YYYY-MM-DD，年份以用户明确描述为准"
+    follow_up_prompt: "请问从哪一天开始放假？"
+
+  - name: end_date
+    type: date
+    required: true
+    description: "放假结束日期，YYYY-MM-DD，包含当天"
+    follow_up_prompt: "请问放假到哪一天结束？"
+
+  - name: workday_arrangement
+    type: string
+    required: true
+    description: >
+      用户明确提供的调休或补班说明。
+      用户明确说不调休时填写无需调休；未说明不能自行填写。
+    follow_up_prompt: "请问哪天补班？如果无需调休，请回复“无需调休”。"
+
+  - name: title
+    type: string
+    required: false
+    description: "用户指定的通知标题；未指定则不填写"
+
+  - name: advance_days
+    type: integer
+    required: false
+    description: "用户指定的提前推送天数；未指定不填写"
+
+  - name: duty_schedule
+    type: list
+    required: false
+    default: []
+    description: >
+      值班安排列表，每项包含 user_id、duty_date、duty_time、duty_notes。
+      user_id 必须为用户明确提供的本地数字ID，不能根据姓名猜测。
+      duty_date 为 YYYY-MM-DD，duty_time 为 HH:MM-HH:MM。
+
+  - name: deadline
+    type: datetime
+    required: false
+    description: >
+      用户明确指定的确认截止时间，ISO8601格式，必须带+08:00。
+      未指定不填写。

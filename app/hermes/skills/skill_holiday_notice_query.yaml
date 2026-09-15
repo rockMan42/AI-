@@ -1,0 +1,23 @@
+name: holiday_notice_query
+display_name: "查询节假日通知"
+description: >
+  管理员查询节假日通知是否发送、推送进度、确认情况。
+  例如“五一通知发了吗”“五一通知确认情况”。
+triggers:
+  - "通知发了吗"
+  - "通知确认情况"
+  - "通知推送进度"
+  - "通知统计"
+priority: 20
+slots:
+  - name: keyword
+    type: string
+    required: false
+    description: >
+      用户提及的节假日名称或标题关键词，保留原始名称。
+      未指定则查询最近通知。
+
+  - name: notice_id
+    type: integer
+    required: false
+    description: "用户明确提供的通知编号，不能猜测"

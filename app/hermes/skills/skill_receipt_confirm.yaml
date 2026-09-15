@@ -1,0 +1,18 @@
+name: receipt_confirm
+display_name: "确认收到通知"
+description: >
+  员工确认已经收到节假日通知。
+  明确确认通知或已有通知回执上下文时使用。
+  请假申请确认、通知录入确认不属于本意图。
+triggers:
+  - "确认收到通知"
+  - "收到放假通知"
+  - "确认通知"
+priority: 20
+slots:
+  - name: notice_id
+    type: integer
+    required: false
+    description: >
+      用户明确指定的通知编号。
+      未指定时不填写，由系统匹配最近未确认通知。

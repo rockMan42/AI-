@@ -154,6 +154,17 @@ class Settings(BaseSettings):
     knowledge_cleanup_poll_seconds: float = Field(default=30.0, gt=0)
     knowledge_cleanup_batch_size: int = Field(default=10, ge=1, le=100)
 
+    # 增加配置和请求模型
+    # 节假通知
+    holiday_llm_model: str = "qwen-max" # 提取放假安排、生成通知正文使用的模型
+    holiday_advance_days: int = Field(default=3, ge=0) # 默认在放假前几天推送通知
+    holiday_push_hour: int = Field(default=9, ge=0, le=23) # 默认北京时间上午 9 点推送
+    holiday_deadline_hour: int = Field(default=18, ge=0, le=23) # 默认在放假前一天北京时间 18 点截止确认
+    holiday_reminder_interval_hours: int = Field(default=4,ge=1) # 首次催办等待 4 小时，后续催办至少间隔 4 小时
+    holiday_max_reminders: int = Field(default=3, ge=1) # 最多催办 3 次
+    holiday_worker_poll_seconds: float = Field(default=1.0, gt=0) # Worker 每轮处理后等待 1 秒，再检查到期任务
+
+
     # 指定了 env_file = ".env"，就不再需要手动 load_dotenv() 了, 启动时自动读取.env配置
     model_config = {
         "env_file": Path(__file__).resolve().parents[2] / ".env",

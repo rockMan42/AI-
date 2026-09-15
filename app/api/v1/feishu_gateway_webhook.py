@@ -10,7 +10,11 @@ from app.services.conversation_engine.feishu import (
     _send_feishu_card_reply,
 )
 from pydantic import ValidationError
+from sqlalchemy import select
 
+from app.models.user import User
+from app.services.holiday import RECEIPT_WORDS
+from app.skill_executor.holiday import ReceiptConfirmExecutor
 from app.security.feishu_event import decode_feishu_event
 from app.services.attendance.leave_chat import handle_leave_command
 from app.services.attendance.leave_service import LeaveError
@@ -134,10 +138,12 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
         return response.success_response("Message already processed")
 
     # 白名单校验
-    allowed_users = settings.feishu_allowed_users.split(",")
-    if open_id not in allowed_users:
-        log.info(f"用户{open_id}不在白名单中,忽略消息")
-        return response.success_response("User not allowed")
+    allowed_users = {
+        value.strip()
+        for value in settings.feishu_allowed_users.split(",")
+        if value.strip()
+    }
+    business_allowed = open_id in allowed_users
 
     # 仅处理文本消息
     if msg_type != "text":
@@ -182,9 +188,16 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
     # 获取或创建系统用户
     with phase("feishu_user"):
         async with create_session() as identity_db:
-            user = await get_or_create_user(open_id, identity_db)
-            identity_db.expunge(user)
-    if user.status not in ACTIVE_STATUSES:
+            if business_allowed:
+                user = await get_or_create_user(open_id, identity_db)
+            else:
+                user = await identity_db.scalar(
+                    select(User).where(User.feishu_open_id == open_id)
+                )
+
+            if user is not None:
+                identity_db.expunge(user)
+    if user is None or user.status not in ACTIVE_STATUSES:
         await _send_feishu_reply(
             message_id,
             "当前用户已停用，无法使用此服务。",
@@ -192,6 +205,16 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
         return response.success_response("User disabled")
 
     try:
+        receipt_reply = await try_handle_receipt_text(
+            user, text, message_id,
+        )
+        if receipt_reply is not None:
+            await send_business_reply(message_id, receipt_reply, "p2p")
+            return response.success_response("通知回执已处理")
+
+        if not business_allowed:
+            return response.success_response("User not allowed")
+
         leave_reply = await handle_leave_command(
             user.feishu_open_id,
             text,
@@ -216,13 +239,17 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
     session = await conversation_manager.update_intent_state(session_id,user.user_id,IntentState.INTENT_PENDING)
 
     if (
-        session.intent_code == "leave_apply"
+            session.intent_code in {
+            "leave_apply",
+            "holiday_notice_create",
+        }
+
         and session.status == "awaiting_confirmation"
         and text.strip() in {"确认", "确认提交", "取消"}
     ):
         await _send_feishu_reply(
             message_id,
-            "请点击上一张确认卡片中的“确认提交”或“取消”按钮。",
+            "请点击上一张确认卡片中的确认或取消按钮",
         )
         return response.success_response("Waiting for card action")
 
@@ -332,6 +359,26 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
     # 路由skill
     try:
         llm_result = parse_llm_json(reply)
+        if llm_result.get("intent") == "holiday_notice_create":
+            try:
+                holiday_result = await model_runner.run(
+                    lambda: classify_intent(
+                        settings,
+                        classification_input,
+                        intent_system_prompt,
+                        model=settings.holiday_llm_model,
+                        max_tokens=2048,
+                    )
+                )
+                holiday_parsed = parse_llm_json(
+                    holiday_result["final_response"]
+                )
+                if holiday_parsed.get("intent") != "holiday_notice_create":
+                    raise ValueError("节假日意图复核不一致")
+                llm_result = holiday_parsed
+            except Exception:
+                await _send_feishu_reply(message_id, "放假安排提取失败，请稍后重试")
+                return response.success_response("Holiday notice extraction failed")
         log.info(
             "意图识别结果 intent=%s confidence=%s slots=%s",
             llm_result.get("intent"),
@@ -619,7 +666,10 @@ async def handle_skill_action(
             return skill_result.message
 
         if (
-            skill.name == "leave_apply"
+                skill.name in {
+                "leave_apply",
+                "holiday_notice_create",
+            }
             and skill_result.data.get("awaiting_confirmation")
         ):
             session.status = "awaiting_confirmation"
@@ -645,7 +695,13 @@ async def handle_skill_action(
         return skill_result.card
 
     # 知识回答不再交给 LLM 改写
-    if skill.name in {"policy_query", "leave_apply"}:
+    if skill.name in {
+        "policy_query",
+        "leave_apply",
+        "holiday_notice_create",
+        "receipt_confirm",
+        "holiday_notice_query",
+    }:
         return skill_result.message
 
     prompt = (
@@ -860,6 +916,11 @@ continuation_context：
    表达提交请假申请才属于 leave_apply。
 5. 查询别人但未提供明确系统用户 ID 时，
    query_target 返回 other，不得猜测 target_user_id。
+6. 公司统一放假、补班和值班安排属于 holiday_notice_create，
+   不属于个人请假 leave_apply。
+7. 查询通知是否发送、确认情况属于 holiday_notice_query。
+8. receipt_confirm 只用于确认收到通知，
+   不能用来提交请假申请或确认创建放假安排。
 
 输出格式：
 {{
@@ -932,3 +993,49 @@ async def send_business_reply(
         return
 
     await _send_feishu_reply(message_id,clean_markdown(reply))
+
+
+async def try_handle_receipt_text(user, text: str, message_id: str):
+    normalized = text.strip().rstrip("。！! ")
+
+    explicit = re.fullmatch(
+        r"(?:收到|确认)通知\s*(\d+)",
+        normalized,
+    )
+    if normalized not in RECEIPT_WORDS and explicit is None:
+        return None
+
+    session = await session_store.load(str(user.user_id))
+
+    if explicit is None and session is not None:
+        # 待补槽位、请假确认和通知录入确认优先。
+        active_business = (
+            session.intent_code not in {"", "receipt_confirm"}
+            and session.workflow_state not in {"completed", "failed"}
+            and session.status not in {"completed", "expired"}
+        )
+        if active_business:
+            return None
+
+    context = SkillContext(
+        user_id=user.user_id,
+        open_id=user.feishu_open_id,
+        role=user.role,
+        department_id=user.department_id,
+        session_id=str(user.user_id),
+        message_id=message_id,
+    )
+
+    try:
+        result = await ReceiptConfirmExecutor().executor(
+            context,
+            {"notice_id": int(explicit[1])} if explicit else {},
+            None,
+        )
+        return result.message
+    except Exception as exc:
+        log.error(
+            "receipt_text_failed error_type=%s",
+            type(exc).__name__,
+        )
+        return "回执服务暂不可用，请稍后重试。"

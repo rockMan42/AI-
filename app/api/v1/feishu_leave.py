@@ -39,9 +39,14 @@ async def callback_actor(open_id: str) -> User:
         return actor
 
 
-@router.post("/webhook/feishu/leave-card")
+@router.post("/api/v1/feishu/callback/card")
 async def leave_card_callback(request: Request):
     data = await decode_feishu_event(request)
+    return await handle_leave_card_data(data)
+
+
+
+async def handle_leave_card_data(data: dict):
     if data.get("type") == "url_verification":
         return {"challenge": data["challenge"]}
 
