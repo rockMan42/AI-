@@ -1,7 +1,9 @@
 skills_dirs:
-  - "app/hermes/skills" # 技能目录（与旧版一致）
+  - "app/hermes/skills"
+
 tools_dirs:
-  - "app/hermes/tools"  # 自定义工具目录
+  - "app/hermes/tools"
+
 mcp_servers:
   enterprise_knowledge_mcp:
     command: python
@@ -13,3 +15,17 @@ mcp_servers:
     tools:
       include:
         - knowledge_search
+
+  oa_material_requisition_mcp:
+    command: python
+    args:
+      - "-m"
+      - "app.hermes.mcp.requisition_mcp_server"
+    connect_timeout: 30
+    timeout: 15
+    tools:
+      include:
+        - list_categories
+        - get_category_fields
+        - submit_requisition
+        - query_requisition

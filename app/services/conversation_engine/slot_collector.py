@@ -3,12 +3,13 @@ import re
 from copy import deepcopy
 from datetime import date, datetime
 from typing import Any
-
-from app.services.conversation_engine.category_template import load_category_template
 from app.services.conversation_engine.register_skill import SkillSchema
 from app.services.conversation_engine.session_store import SessionStore
 from app.services.conversation_engine.slot_manage import MAX_TURNS, SessionSlots, SlotState
-
+from app.core.database import create_session
+from app.services.conversation_engine.category_template import (
+    load_category_template,
+)
 
 logger = logging.getLogger(__name__)
 POSITIVE_NUMBER_SLOTS = {"amount", "duration", "quantity"}
@@ -34,6 +35,14 @@ class SlotCollector:
         if slot is None or slot.filled or not text:
             return None
 
+        if session.intent_code == "requisition_apply":
+            requisition_slots = self._extract_requisition_reply(
+                session,
+                text,
+            )
+            if requisition_slots:
+                return requisition_slots
+
         raw_value = self._extract_direct_value(slot, text)
         if raw_value is None:
             return None
@@ -44,6 +53,85 @@ class SlotCollector:
             return None
 
         return {slot.name: raw_value}
+
+    def _extract_requisition_reply(
+        self,
+        session: SessionSlots,
+        text: str,
+    ) -> dict:
+        """解析一次性补充的多个物资申领字段。"""
+        extracted = {}
+        clauses = [
+            item.strip()
+            for item in re.split(r"[，,。；;\n]+", text)
+            if item.strip()
+        ]
+
+        patterns = {
+            "specification": re.compile(
+                r"^(?:规格(?:型号)?|型号)\s*(?:是|为|[:：])?\s*(.+)$"
+            ),
+            "reason": re.compile(
+                r"^(?:申领|申请)?原因\s*(?:是|为|[:：])?\s*(.+)$"
+            ),
+            "purpose": re.compile(
+                r"^(?:用途|使用目的)\s*(?:是|为|[:：])?\s*(.+)$"
+            ),
+        }
+
+        for clause in clauses:
+            date_match = re.search(
+                r"(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?",
+                clause,
+            )
+            if (
+                date_match
+                and any(word in clause for word in ("预计", "归还", "返还"))
+                and self._slot_exists(session, "expected_return_date")
+            ):
+                extracted["expected_return_date"] = (
+                    f"{int(date_match.group(1)):04d}-"
+                    f"{int(date_match.group(2)):02d}-"
+                    f"{int(date_match.group(3)):02d}"
+                )
+                continue
+
+            matched = False
+            for name, pattern in patterns.items():
+                match = pattern.match(clause)
+                if match and self._slot_exists(session, name):
+                    extracted[name] = match.group(1).strip()
+                    matched = True
+                    break
+            if matched:
+                continue
+
+            if (
+                self._slot_needs_value(session, "purpose")
+                and (
+                    clause.startswith("用于")
+                    or clause.endswith("使用")
+                    or clause.endswith("用途")
+                )
+            ):
+                extracted["purpose"] = clause
+
+        return extracted
+
+    @staticmethod
+    def _slot_needs_value(
+        session: SessionSlots,
+        slot_name: str,
+    ) -> bool:
+        slot = session.slots.get(slot_name)
+        return bool(slot is not None and not slot.filled)
+
+    @staticmethod
+    def _slot_exists(
+        session: SessionSlots,
+        slot_name: str,
+    ) -> bool:
+        return slot_name in session.slots
 
     async def collect(
         self,
@@ -68,13 +156,13 @@ class SlotCollector:
         await self._sync_category_slots(session)
         self._apply_defaults(session)
 
-        invalid_slot = self._pick_invalid_slot(
-            session,
-            invalid_slots,
-        )
-        next_slot = invalid_slot or session.get_next_unfilled_required()
+        missing_slots = [
+            slot
+            for slot in session.slots.values()
+            if slot.required and not slot.filled
+        ]
 
-        if next_slot is None:
+        if not missing_slots:
             session.pending_slot = None
             session.status = "completed"
             session.turn_count = 0
@@ -86,7 +174,13 @@ class SlotCollector:
             }
 
         session.turn_count += 1
-        if session.turn_count >= MAX_TURNS:
+        max_turns = (
+            3
+            if session.intent_code == "requisition_apply"
+            else MAX_TURNS
+        )
+
+        if session.turn_count > max_turns:
             session.pending_slot = None
             session.status = "expired"
             session.state = "failed"
@@ -94,17 +188,37 @@ class SlotCollector:
             await self.store.save(session)
             return {
                 "action": "fallback",
-                "message": "对话轮次过多，建议重新完整描述你的需求。",
+                "message": "信息收集已超过最大轮次，请重新完整描述需求。",
                 "slots": session.filled_values(),
             }
 
-        session.pending_slot = next_slot.name
+        session.pending_slot = missing_slots[0].name
         session.status = "collecting"
-        next_slot.asked = True
-        next_slot.asked_count += 1
+
+        for slot in missing_slots:
+            slot.asked = True
+            slot.asked_count += 1
+
         await self.store.save(session)
 
+        if session.intent_code == "requisition_apply":
+            questions = [
+                f"• {slot.description or slot.name}"
+                for slot in missing_slots
+            ]
+            return {
+                "action": "ask",
+                "message": (
+                        "还需要补充以下信息：\n"
+                        + "\n".join(questions)
+                        + "\n请一次性告诉我。"
+                ),
+                "slots": session.filled_values(),
+            }
+
+        next_slot = missing_slots[0]
         ask_message = self._build_ask_message(next_slot)
+
         if next_slot.error:
             ask_message = f"{next_slot.error}\n{ask_message}"
 
@@ -196,8 +310,8 @@ class SlotCollector:
         return invalid_slots
 
     async def _sync_category_slots(
-        self,
-        session: SessionSlots,
+            self,
+            session: SessionSlots,
     ) -> None:
         if session.intent_code != "requisition_apply":
             return
@@ -207,27 +321,46 @@ class SlotCollector:
             return
 
         category = str(category_slot.value)
-        if session.dynamic_category == category:
+
+        try:
+            async with create_session() as db:
+                definitions = await load_category_template(
+                    db,
+                    category,
+                )
+        except ValueError as exc:
+            category_slot.error = str(exc)
+            category_slot.filled = False
             return
 
-        for slot_name in session.dynamic_slot_names:
-            session.slots.pop(slot_name, None)
+        # 每轮都重新应用规则。
+        # _sync_static_slots 会恢复 YAML，所以不能因品类未变化而直接返回。
+        dynamic_names = set()
 
-        session.dynamic_slot_names = []
-        session.dynamic_category = category
+        for definition in definitions:
+            name = definition["name"]
+            dynamic_names.add(name)
 
-        for definition in await load_category_template(category):
-            slot = SlotState(
-                name=definition["name"],
-                type=definition.get("type", "string"),
-                required=bool(definition.get("required", False)),
-                description=definition.get("description", ""),
-                enum=list(definition.get("enum") or []),
-                default=definition.get("default"),
-                follow_up_prompt=definition.get("follow_up_prompt"),
+            slot = session.slots.get(name)
+            if slot is None:
+                slot = SlotState(name=name)
+                session.slots[name] = slot
+
+            slot.type = definition.get("type", "string")
+            slot.required = bool(
+                definition.get("required", False)
             )
-            session.slots[slot.name] = slot
-            session.dynamic_slot_names.append(slot.name)
+            slot.description = definition.get(
+                "description",
+                name,
+            )
+            slot.default = definition.get("default")
+            slot.follow_up_prompt = definition.get(
+                "follow_up_prompt",
+            )
+
+        session.dynamic_category = category
+        session.dynamic_slot_names = sorted(dynamic_names)
 
     def _apply_defaults(self, session: SessionSlots) -> None:
         for slot in session.slots.values():

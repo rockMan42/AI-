@@ -236,10 +236,18 @@ async def card_callback(request: Request):
     if not isinstance(value, dict):
         raise HTTPException(422, "卡片操作参数无效")
 
-    # 一个回调入口分发已有请假卡片与新增通知卡片。
+    # 一个回调入口分发不同业务卡片。
     if value.get("module") == "leave":
         from app.api.v1.feishu_leave import handle_leave_card_data
+
         return await handle_leave_card_data(data)
+
+    if value.get("module") == "requisition":
+        from app.api.v1.feishu_requisition import (
+            handle_requisition_card_data,
+        )
+
+        return await handle_requisition_card_data(data)
 
     open_id = (event.get("operator") or {}).get("open_id", "")
     operation = value.get("action")

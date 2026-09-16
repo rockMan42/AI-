@@ -1,6 +1,6 @@
 name: requisition_apply
 display_name: "申领物资"
-description: "处理办公用品、IT设备等实物物资的申领申请，支持按品类动态收集规格字段"
+description: "处理办公用品、IT设备、劳保用品等物资申领；按品类规则动态补齐字段并发送确认卡片。"
 triggers:
   - "申领"
   - "领用"
@@ -8,36 +8,53 @@ triggers:
   - "办公用品"
   - "领一台"
   - "领一个"
+  - "打印纸"
+  - "电脑"
 priority: 10
+
+# 全部字段必须在静态 YAML 中声明，LLM 才能在首轮提取。
+# 是否必填由 t_category_field_rule 动态覆盖。
 slots:
   - name: item_category
     type: string
     required: true
     default: null
-    follow_up_prompt: "请问你要申领什么品类？（IT设备/办公用品/劳保用品）"
-    description: "物资分类，对应 t_requisition.item_category"
-    enum: ["办公用品", "IT设备", "劳保用品"]
+    follow_up_prompt: "请问您要申领什么品类？（办公用品/IT设备/劳保用品/其他）"
+    description: "物资分类"
+    enum: ["办公用品", "IT设备", "劳保用品", "其他"]
+
   - name: item_name
     type: string
-    required: true
+    required: false
     default: null
-    follow_up_prompt: "具体要领什么物品？"
-    description: "物资名称，对应 t_requisition.item_name"
+    description: "物资名称"
+
   - name: specification
     type: string
     required: false
     default: null
-    follow_up_prompt: "有什么规格要求吗？（如颜色、尺寸等）"
-    description: "规格型号，对应 t_requisition.specification，由 t_category_field_mapping 动态决定是否为必填"
+    description: "规格型号"
+
   - name: quantity
     type: integer
-    required: true
-    default: 1
-    follow_up_prompt: "需要多少个？"
-    description: "申领数量，对应 t_requisition.quantity，默认1"
+    required: false
+    default: null
+    description: "申领数量"
+
   - name: reason
     type: string
-    required: true
+    required: false
     default: null
-    follow_up_prompt: "请简单说明申领理由"
-    description: "申领原因，对应 t_requisition.reason"
+    description: "申领原因"
+
+  - name: purpose
+    type: string
+    required: false
+    default: null
+    description: "用途说明"
+
+  - name: expected_return_date
+    type: date
+    required: false
+    default: null
+    description: "预计归还日期，格式 YYYY-MM-DD"

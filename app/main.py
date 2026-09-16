@@ -15,6 +15,7 @@ from app.services.knowledge.document_cleanup import (
     start_cleanup_worker,
     stop_cleanup_worker,
 )
+from app.api.v1 import requisition
 from app.api.v1 import holiday
 from app.services.holiday_cron import (
     start_holiday_worker,
@@ -97,6 +98,7 @@ app.include_router(attendance.router, prefix=settings.app_prefix, tags=["attenda
 app.include_router(leave.router,prefix=settings.app_prefix,tags=["leave"],)
 app.include_router(feishu_leave.router, prefix=settings.app_prefix, tags=["feishu_leave"],)
 app.include_router( holiday.router, prefix=settings.app_prefix, tags=["holiday"],)
+app.include_router(requisition.router, prefix=settings.app_prefix, tags=["requisition"],)
 
 # 应用启动时注册skill
 register = get_skill_register()

@@ -1,6 +1,10 @@
 
 from app.models.knowledge_document import KnowledgeDocument
-
+from app.models.requisition import (
+    CategoryFieldRule,
+    Requisition,
+    RequisitionApproval,
+)
 from app.models.knowledge_chunk import KnowledgeChunk
 from app.models.user import User
 from app.models.department import Department
@@ -27,4 +31,7 @@ __all__ = [
     "KnowledgeSearchLog",
     "Department",
     "User",
+    "CategoryFieldRule",
+    "Requisition",
+    "RequisitionApproval",
 ]

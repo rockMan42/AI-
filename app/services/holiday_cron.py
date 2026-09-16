@@ -15,6 +15,7 @@ TASK_PREFIX = "dep:cron:task:"
 SUPPORTED_TYPES = {
     "HOLIDAY_NOTICE_PUSH",
     "RECEIPT_REMINDER",
+    "APPROVAL_POLL",
 }
 
 _worker = None
@@ -224,6 +225,15 @@ async def execute_task(task_id: str, *, force: bool = False):
 
     if task["task_type"] not in SUPPORTED_TYPES:
         return {"status": "IGNORED"}
+
+    if task["task_type"] == "APPROVAL_POLL":
+        from app.services.requisition.approval_poll_service import (
+            execute_approval_poll,
+        )
+        return await execute_approval_poll(
+            task_id,
+            force=force,
+        )
 
     notice_id = int(task["payload"]["notice_id"])
 

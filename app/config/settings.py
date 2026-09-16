@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings
 from pathlib import Path
 from typing import Literal
 from pydantic import model_validator
+from typing import Literal
 
 # 继承了BaseSettings，因此允许从环境变量中自动读取配置映射到对应的字段,不区分大小写
 class Settings(BaseSettings):
@@ -164,6 +165,19 @@ class Settings(BaseSettings):
     holiday_max_reminders: int = Field(default=3, ge=1) # 最多催办 3 次
     holiday_worker_poll_seconds: float = Field(default=1.0, gt=0) # Worker 每轮处理后等待 1 秒，再检查到期任务
 
+    # 没有真实 OA 时使用 local；以后对接真实 OA 改成 http
+    oa_requisition_mode: Literal["local", "http"] = "local"
+
+    oa_requisition_base_url: str = "http://127.0.0.1:8080"
+
+    oa_requisition_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=30,
+    )
+
+    # 仅允许开发环境使用状态模拟接口
+    requisition_mock_enabled: bool = False
 
     # 指定了 env_file = ".env"，就不再需要手动 load_dotenv() 了, 启动时自动读取.env配置
     model_config = {

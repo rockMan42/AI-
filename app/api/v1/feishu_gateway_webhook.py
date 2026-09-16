@@ -239,10 +239,11 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
     session = await conversation_manager.update_intent_state(session_id,user.user_id,IntentState.INTENT_PENDING)
 
     if (
-            session.intent_code in {
-            "leave_apply",
-            "holiday_notice_create",
-        }
+        session.intent_code in {
+        "leave_apply",
+        "holiday_notice_create",
+        "requisition_apply",
+    }
 
         and session.status == "awaiting_confirmation"
         and text.strip() in {"确认", "确认提交", "取消"}
@@ -667,10 +668,11 @@ async def handle_skill_action(
 
         if (
                 skill.name in {
-                "leave_apply",
-                "holiday_notice_create",
-            }
-            and skill_result.data.get("awaiting_confirmation")
+            "leave_apply",
+            "holiday_notice_create",
+            "requisition_apply",
+        }
+                and skill_result.data.get("awaiting_confirmation")
         ):
             session.status = "awaiting_confirmation"
             session.state = IntentState.INTENT_MATCHED.value
@@ -701,6 +703,7 @@ async def handle_skill_action(
         "holiday_notice_create",
         "receipt_confirm",
         "holiday_notice_query",
+        "requisition_apply",
     }:
         return skill_result.message
 

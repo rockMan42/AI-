@@ -27,6 +27,11 @@ _knowledge_client: KnowledgeMCPClient | None = None
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SERVER_NAME = "enterprise_knowledge_mcp"
 TOOL_NAME = f"mcp__{SERVER_NAME}__knowledge_search"
+REQUISITION_SERVER_NAME = "oa_material_requisition_mcp"
+REQUISITION_TOOL_NAMES = (
+    "submit_requisition",
+    "query_requisition",
+)
 AGENT_MODEL = "qwen3.8-2.4t-a95b"
 AGENT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
@@ -58,6 +63,14 @@ async def init_hermes_agent(settings: Settings):
         knowledge_server = servers.pop(SERVER_NAME)
         if servers:
             await asyncio.to_thread(register_mcp_servers, servers)
+        for tool_name in REQUISITION_TOOL_NAMES:
+            registry_name = (
+                f"mcp__{REQUISITION_SERVER_NAME}__{tool_name}"
+            )
+            if registry.get_entry(registry_name) is None:
+                raise RuntimeError(
+                    f"物资申领 MCP 工具注册失败: {registry_name}"
+                )
         _knowledge_client = KnowledgeMCPClient(
             knowledge_server, cwd=str(PROJECT_ROOT),
             concurrency=settings.rag_query_concurrency,

@@ -1,0 +1,15 @@
+name: requisition_status_query
+display_name: "查询物资申领进度"
+description: "查询当前员工最近一笔或指定物资申领单的审批状态"
+triggers:
+  - "我的申领单批了吗"
+  - "查询申领进度"
+  - "物资审批到哪了"
+  - "申领状态"
+priority: 11
+slots:
+  - name: requisition_id
+    type: integer
+    required: false
+    default: null
+    description: "申领单数字编号"
