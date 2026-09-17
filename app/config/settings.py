@@ -179,6 +179,18 @@ class Settings(BaseSettings):
     # 仅允许开发环境使用状态模拟接口
     requisition_mock_enabled: bool = False
 
+    # 发票 OCR
+    invoice_ocr_model: str = "qwen-vl-max"
+    invoice_ocr_api_url: str = (
+        "https://dashscope.aliyuncs.com/api/v1/services/"
+        "aigc/multimodal-generation/generation"
+    )
+    invoice_ocr_confidence_threshold: float = Field(
+        default=0.85,
+        gt=0,
+        le=1,
+    )
+
     # 指定了 env_file = ".env"，就不再需要手动 load_dotenv() 了, 启动时自动读取.env配置
     model_config = {
         "env_file": Path(__file__).resolve().parents[2] / ".env",

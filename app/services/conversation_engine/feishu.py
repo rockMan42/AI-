@@ -303,3 +303,17 @@ async def send_feishu_card(
     if not message_id:
         raise RuntimeError("飞书未返回消息编号")
     return message_id
+
+
+async def update_feishu_card(message_id: str, card: dict):
+    token = await _get_tenant_access_token()
+    await wait_feishu_send_slot()
+    response = await get_feishu_client().patch(
+        f"{FEISHU_API_BASE}/im/v1/messages/{message_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"content": json.dumps(card, ensure_ascii=False)},
+    )
+    response.raise_for_status()
+    data = response.json()
+    if data.get("code") != 0:
+        raise RuntimeError(f"飞书卡片更新失败 code={data.get('code')}")

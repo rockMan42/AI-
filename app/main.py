@@ -1,5 +1,4 @@
 # FastAPI入口
-import asyncio
 from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI
 from app.config.settings import get_settings
@@ -15,6 +14,10 @@ from app.services.knowledge.document_cleanup import (
     start_cleanup_worker,
     stop_cleanup_worker,
 )
+from app.api.v1 import invoice
+from app.services.expense.chat import InvoiceChat
+from app.services.expense.invoice_ocr import InvoiceOCRService
+from app.services.expense.invoice_service import InvoiceService
 from app.api.v1 import requisition
 from app.api.v1 import holiday
 from app.services.holiday_cron import (
@@ -61,6 +64,25 @@ async def lifespan(app: FastAPI):
         await init_minio(settings)
         stack.push_async_callback(close_minio)
 
+        invoice_ocr = InvoiceOCRService(
+            api_key=settings.dashscope_api_key,
+            api_url=settings.invoice_ocr_api_url,
+            model=settings.invoice_ocr_model,
+            confidence_threshold=(
+                settings.invoice_ocr_confidence_threshold
+            ),
+        )
+        stack.push_async_callback(invoice_ocr.close)
+
+        invoice_service = InvoiceService(invoice_ocr)
+        invoice_chat = InvoiceChat(invoice_service)
+
+        stack.push_async_callback(invoice_chat.close)
+
+        app.state.invoice_ocr_service = invoice_ocr
+        app.state.invoice_service = invoice_service
+        app.state.invoice_chat = invoice_chat
+
         service = RAGService(settings)
         stack.push_async_callback(service.close)
         app.state.rag_service = service
@@ -99,6 +121,7 @@ app.include_router(leave.router,prefix=settings.app_prefix,tags=["leave"],)
 app.include_router(feishu_leave.router, prefix=settings.app_prefix, tags=["feishu_leave"],)
 app.include_router( holiday.router, prefix=settings.app_prefix, tags=["holiday"],)
 app.include_router(requisition.router, prefix=settings.app_prefix, tags=["requisition"],)
+app.include_router(invoice.router, prefix=settings.app_prefix, tags=["invoice"],)
 
 # 应用启动时注册skill
 register = get_skill_register()

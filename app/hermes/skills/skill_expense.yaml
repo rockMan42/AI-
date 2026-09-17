@@ -1,6 +1,6 @@
 name: expense_reimburse
 display_name: "办理报销"
-description: "处理差旅报销申请，支持关联出差单、录入费用明细、上传发票，自动匹配报销规则校验限额"
+description: "引导员工上传报销发票，识别发票信息并由员工确认或修改"
 triggers:
   - "报销"
   - "差旅费"
@@ -8,41 +8,47 @@ triggers:
   - "报销单"
   - "发票"
 priority: 10
+
 slots:
   - name: trip_id
     type: integer
     required: false
     default: null
     follow_up_prompt: "请关联你的出差申请，或提供出差申请ID"
-    description: "关联出差申请ID，对应 t_expense.trip_id，非出差报销可为空"
+    description: "关联出差申请ID，非出差报销可为空"
+
   - name: expense_type
     type: string
-    required: true
+    required: false
     default: null
-    follow_up_prompt: "请问报销的费用类别是什么？（交通/住宿/餐饮/其他）"
+    follow_up_prompt: "请问报销的费用类别是什么？"
     description: "费用类别，对应 t_expense_item.category"
     enum: ["交通", "住宿", "餐饮", "其他"]
+
   - name: amount
     type: float
-    required: true
+    required: false
     default: null
     follow_up_prompt: "请问本次报销金额是多少？"
     description: "报销金额，对应 t_expense_item.amount"
+
   - name: invoice_no
     type: string
     required: false
     default: null
     follow_up_prompt: "请提供发票号码"
-    description: "发票号码，对应 t_invoice 关联的 t_expense_item.invoice_no"
+    description: "发票号码"
+
   - name: invoice_date
     type: date
     required: false
     default: null
     follow_up_prompt: "请提供开票日期"
-    description: "开票日期，对应 t_expense_item.invoice_date"
+    description: "开票日期"
+
   - name: description
     type: string
     required: false
     default: null
     follow_up_prompt: "请简单说明这笔费用的用途"
-    description: "费用说明，对应 t_expense_item.description"
+    description: "费用说明"

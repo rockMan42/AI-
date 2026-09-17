@@ -9,6 +9,11 @@ from datetime import date
 from app.services.conversation_engine.feishu import (
     _send_feishu_card_reply,
 )
+from app.services.expense.chat import (
+    extract_image_keys,
+    handle_invoice_text,
+)
+from app.services.expense.invoice_service import InvoiceError
 from pydantic import ValidationError
 from sqlalchemy import select
 
@@ -145,10 +150,11 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
     }
     business_allowed = open_id in allowed_users
 
-    # 仅处理文本消息
-    if msg_type != "text":
-        log.info(f"非文本消息,忽略消息")
-        return response.success_response("Only text messages are allowed")
+    if not isinstance(content, dict):
+        content = {}
+
+    if msg_type not in {"text", "image", "post"}:
+        return response.success_response("消息类型已忽略")
 
     if message.get("chat_type") != "p2p":
         await _send_feishu_reply(
@@ -157,8 +163,69 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
         )
         return response.success_response("Private chat required")
 
+    with phase("feishu_user"):
+        async with create_session() as identity_db:
+            if business_allowed:
+                user = await get_or_create_user(
+                    open_id,
+                    identity_db,
+                )
+            else:
+                user = await identity_db.scalar(
+                    select(User).where(
+                        User.feishu_open_id == open_id
+                    )
+                )
+
+            if user is not None:
+                identity_db.expunge(user)
+
+    if user is None or user.status not in ACTIVE_STATUSES:
+        await _send_feishu_reply(
+            message_id,
+            "当前用户不存在或已停用。",
+        )
+        return response.success_response("User disabled")
+
+    if msg_type != "text":
+        if not business_allowed:
+            return response.success_response("User not allowed")
+
+        keys = extract_image_keys(msg_type, content)
+        if not keys:
+            return response.success_response("消息中没有图片")
+
+        session = await session_store.load(
+            str(user.user_id)
+        )
+
+        if (
+                session is None
+                or session.intent_code != "expense_reimburse"
+                or session.status not in {
+            "awaiting_upload",
+            "awaiting_confirmation",
+        }
+        ):
+            await _send_feishu_reply(
+                message_id,
+                "请先发送“我要报销”，再上传发票图片。",
+            )
+            return response.success_response(
+                "Waiting for expense intent"
+            )
+
+        request.app.state.invoice_chat.enqueue(
+            user,
+            message_id,
+            keys,
+            session.intent_started_at,
+        )
+        return response.success_response("发票图片已接收")
+
     text = str(content.get("text", "")).strip()
-    if judge_input_length(text,message_id):
+
+    if judge_input_length(text, message_id):
         await _send_feishu_reply(
             message_id,
             "输入内容不能超过 2000 个字符，请精简后重新发送。",
@@ -170,39 +237,39 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
         f"{open_id}\0{normalized_text}".encode("utf-8")
     ).hexdigest()
 
-    # 消息内容去重（飞书可能重复推送同一条消息）
-    content_dedup_key = f"dep:sess:content_dedup:{content_fingerprint}"
-    content_claimed = await set_cache_if_absent(
-        content_dedup_key,
-        message_id,
-        CONTENT_DEDUP_TTL,
-    )
-    if not content_claimed:
-        log.info(
-            "忽略短时间内重复消息 open_id=%s message_id=%s",
-            open_id,
+    if not await set_cache_if_absent(
+            f"dep:sess:content_dedup:{content_fingerprint}",
             message_id,
+            CONTENT_DEDUP_TTL,
+    ):
+        return response.success_response(
+            "Duplicate content ignored"
         )
-        return response.success_response("Duplicate content ignored")
 
-    # 获取或创建系统用户
-    with phase("feishu_user"):
-        async with create_session() as identity_db:
-            if business_allowed:
-                user = await get_or_create_user(open_id, identity_db)
-            else:
-                user = await identity_db.scalar(
-                    select(User).where(User.feishu_open_id == open_id)
-                )
+    if business_allowed and text.startswith("修改发票"):
+        try:
+            reply = await handle_invoice_text(
+                user.user_id,
+                text,
+                request.app.state.invoice_service,
+            )
+        except InvoiceError as exc:
+            reply = str(exc)
+        except Exception as exc:
+            log.error(
+                "invoice_modify_failed error_type=%s",
+                type(exc).__name__,
+            )
+            reply = "发票修改未完成，请稍后重试。"
 
-            if user is not None:
-                identity_db.expunge(user)
-    if user is None or user.status not in ACTIVE_STATUSES:
-        await _send_feishu_reply(
+        await send_business_reply(
             message_id,
-            "当前用户已停用，无法使用此服务。",
+            reply,
+            "p2p",
         )
-        return response.success_response("User disabled")
+        return response.success_response(
+            "发票修改已处理"
+        )
 
     try:
         receipt_reply = await try_handle_receipt_text(
@@ -667,10 +734,23 @@ async def handle_skill_action(
             return skill_result.message
 
         if (
+            skill.name == "expense_reimburse"
+            and skill_result.data.get("awaiting_upload")
+        ):
+            session.status = "awaiting_upload"
+            session.state = IntentState.INTENT_MATCHED.value
+            session.workflow_state = IntentState.INTENT_MATCHED.value
+            session.pending_slot = None
+
+            await session_store.save(session)
+            return skill_result.message
+
+        if (
                 skill.name in {
             "leave_apply",
             "holiday_notice_create",
             "requisition_apply",
+            "expense_reimburse",
         }
                 and skill_result.data.get("awaiting_confirmation")
         ):

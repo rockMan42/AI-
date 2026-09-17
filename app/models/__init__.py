@@ -19,6 +19,7 @@ from app.models.leave_workflow import (
     LeaveNotification,
     WorkCalendarDay,
 )
+from app.models.expense import Expense, ExpenseItem, Invoice
 
 """
 统一导入入口：其他代码可以写 from app.models import HolidayNotice。

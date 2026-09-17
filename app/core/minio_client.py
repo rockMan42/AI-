@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
-
+import hashlib
+from io import BytesIO
 from minio import Minio, S3Error
 from minio.commonconfig import ENABLED
 from minio.sse import SseS3
@@ -103,3 +104,52 @@ async def check_minio() -> str:
         return "connected" if exists else "bucket_missing"
     except (RuntimeError, S3Error):
         return "error"
+
+async def upload_bytes(
+    data: bytes,
+    object_key: str,
+    content_type: str,
+) -> None:
+    """
+    图片在内存中下载、处理和上传，不产生本地临时图片
+    :param data:
+    :param object_key:
+    :param content_type:
+    :return:
+    """
+    client, bucket = _get_client()
+
+    kwargs = {
+        "bucket_name": bucket,
+        "object_name": object_key,
+        "data": BytesIO(data),
+        "length": len(data),
+        "content_type": content_type,
+        "metadata": {
+            "sha256": hashlib.sha256(data).hexdigest(),
+        },
+    }
+    if _sse_enabled:
+        kwargs["sse"] = SseS3()
+
+    await asyncio.to_thread(client.put_object, **kwargs)
+
+
+async def read_bytes(
+    object_key: str,
+    max_bytes: int,
+) -> bytes:
+    client, bucket = _get_client()
+
+    def read():
+        response = client.get_object(bucket, object_key)
+        try:
+            data = response.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise ValueError("图片不能超过 10MB")
+            return data
+        finally:
+            response.close()
+            response.release_conn()
+
+    return await asyncio.to_thread(read)

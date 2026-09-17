@@ -22,6 +22,7 @@ dependencies = [
     "mcp==1.26.0",
     "cryptography==46.0.7",
     "PyYAML>=6,<7",
+    "Pillow>=12.2,<13",
 ]
 
 [dependency-groups]

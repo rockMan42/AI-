@@ -249,6 +249,14 @@ async def card_callback(request: Request):
 
         return await handle_requisition_card_data(data)
 
+    if value.get("module") == "invoice":
+        from app.api.v1.invoice import handle_invoice_card_data
+
+        return await handle_invoice_card_data(
+            data,
+            request.app.state.invoice_service,
+        )
+
     open_id = (event.get("operator") or {}).get("open_id", "")
     operation = value.get("action")
 
