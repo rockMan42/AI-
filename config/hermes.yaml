@@ -29,3 +29,14 @@ mcp_servers:
         - get_category_fields
         - submit_requisition
         - query_requisition
+  finance_expense_mcp:
+    command: python
+    args:
+      - "-m"
+      - "app.hermes.mcp.finance_mcp_server"
+    connect_timeout: 30
+    timeout: 15
+    tools:
+      include:
+        - submit_expense
+        - query_expense

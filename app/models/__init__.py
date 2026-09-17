@@ -5,6 +5,14 @@ from app.models.requisition import (
     Requisition,
     RequisitionApproval,
 )
+from app.models.expense_flow import (
+    BusinessTrip,
+    ExpenseRule,
+    ExpensePolicy,
+    ExpenseInvoiceClaim,
+    ExpenseRuleAudit,
+    FinanceExpenseMock,
+)
 from app.models.knowledge_chunk import KnowledgeChunk
 from app.models.user import User
 from app.models.department import Department

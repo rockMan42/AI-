@@ -14,6 +14,9 @@ from app.services.knowledge.document_cleanup import (
     start_cleanup_worker,
     stop_cleanup_worker,
 )
+from app.api.v1 import base_call_back
+from app.api.v1 import expense
+from app.services.expense.delivery import ExpenseDelivery
 from app.api.v1 import invoice
 from app.services.expense.chat import InvoiceChat
 from app.services.expense.invoice_ocr import InvoiceOCRService
@@ -104,6 +107,11 @@ async def lifespan(app: FastAPI):
 
         await start_holiday_worker()
         stack.push_async_callback(stop_holiday_worker)
+
+        expense_delivery = ExpenseDelivery()
+        await expense_delivery.start()
+        stack.push_async_callback(expense_delivery.close)
+
         yield
 
 settings = get_settings()
@@ -122,6 +130,8 @@ app.include_router(feishu_leave.router, prefix=settings.app_prefix, tags=["feish
 app.include_router( holiday.router, prefix=settings.app_prefix, tags=["holiday"],)
 app.include_router(requisition.router, prefix=settings.app_prefix, tags=["requisition"],)
 app.include_router(invoice.router, prefix=settings.app_prefix, tags=["invoice"],)
+app.include_router(expense.router,prefix=settings.app_prefix,tags=["expense"],)
+app.include_router(base_call_back.router, prefix=settings.app_prefix, tags=["feishu_callback"],)
 
 # 应用启动时注册skill
 register = get_skill_register()

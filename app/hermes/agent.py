@@ -21,6 +21,10 @@ from app.schemas.knowledge import KnowledgeSearchRequest, KnowledgeSearchRespons
 from app.security.knowledge import issue_identity_token
 from tools.registry import registry
 
+
+FINANCE_SERVER_NAME = "finance_expense_mcp"
+FINANCE_TOOL_NAMES = ("submit_expense", "query_expense")
+
 _agent_settings: Settings | None = None
 _knowledge_client: KnowledgeMCPClient | None = None
 
@@ -43,8 +47,11 @@ def _create_agent(settings: Settings) -> AIAgent:
         api_key=settings.dashscope_api_key,
         base_url=AGENT_BASE_URL,
         quiet_mode=True,
-        disabled_toolsets=[f"mcp-{SERVER_NAME}",
-                           ATTENDANCE_TOOLSET]  # 这里禁止分类阶段自由调用考勤 Tool，由现有业务执行器在认证身份明确后调用。Tool 仍然真实注册在 Hermes registry 中，不需要新增 MCP 服务或修改 config/hermes.yaml。
+        disabled_toolsets=[
+            f"mcp-{SERVER_NAME}",
+            ATTENDANCE_TOOLSET,
+            f"mcp-{FINANCE_SERVER_NAME}",
+        ],  # 这里禁止分类阶段自由调用考勤 Tool，由现有业务执行器在认证身份明确后调用。Tool 仍然真实注册在 Hermes registry 中，不需要新增 MCP 服务或修改 config/hermes.yaml。
         # skills_dir="app/hermes/skills",
         # tools_dir="app/hermes/tools",
         # mcp_dir="app/hermes/mcp",
@@ -71,6 +78,16 @@ async def init_hermes_agent(settings: Settings):
                 raise RuntimeError(
                     f"物资申领 MCP 工具注册失败: {registry_name}"
                 )
+
+        for tool_name in FINANCE_TOOL_NAMES:
+            registry_name = (
+                f"mcp__{FINANCE_SERVER_NAME}__{tool_name}"
+            )
+            if registry.get_entry(registry_name) is None:
+                raise RuntimeError(
+                    f"财务 MCP 工具注册失败: {registry_name}"
+                )
+
         _knowledge_client = KnowledgeMCPClient(
             knowledge_server, cwd=str(PROJECT_ROOT),
             concurrency=settings.rag_query_concurrency,
@@ -132,6 +149,12 @@ def _mcp_config(settings: Settings) -> dict:
     server["env"] = environment
     servers = dict(config["mcp_servers"])
     servers[SERVER_NAME] = server
+
+    finance = dict(servers[FINANCE_SERVER_NAME])
+    finance["command"] = sys.executable
+    finance["env"] = dict(environment)
+    servers[FINANCE_SERVER_NAME] = finance
+
     return servers
 
 

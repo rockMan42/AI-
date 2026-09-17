@@ -13,6 +13,7 @@ from app.services.expense.chat import (
     extract_image_keys,
     handle_invoice_text,
 )
+from app.services.expense.expense_chat import handle_expense_text
 from app.services.expense.invoice_service import InvoiceError
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -271,6 +272,30 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
             "发票修改已处理"
         )
 
+    if business_allowed:
+        try:
+            expense_reply = await handle_expense_text(
+                user.user_id,
+                text,
+            )
+        except InvoiceError as exc:
+            expense_reply = str(exc)
+        except ValidationError as exc:
+            expense_reply = "报销信息有误：" + "；".join(
+                error["msg"] for error in exc.errors()
+            )
+        except Exception:
+            log.exception("expense_text_failed")
+            expense_reply = "报销处理未完成，请稍后重试。"
+
+        if expense_reply is not None:
+            await send_business_reply(
+                message_id,
+                expense_reply,
+                "p2p",
+            )
+            return response.success_response("报销命令已处理")
+        
     try:
         receipt_reply = await try_handle_receipt_text(
             user, text, message_id,

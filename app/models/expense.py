@@ -11,6 +11,7 @@ from sqlalchemy import (
     JSON,
     Numeric,
     String,
+    Integer,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -48,6 +49,32 @@ class Expense(Base):
     )
     approver_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("t_user.user_id"),
+    )
+    expense_no: Mapped[str | None] = mapped_column(
+        String(40), unique=True,
+    )
+    source_key: Mapped[str | None] = mapped_column(
+        String(64), unique=True,
+    )
+    payload: Mapped[dict | None] = mapped_column(JSON)
+
+    has_override: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False,
+        server_default="0",
+    )
+    override_reason: Mapped[str | None] = mapped_column(
+        String(500),
+    )
+    finance_no: Mapped[str | None] = mapped_column(String(40))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    submit_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    notified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0",
     )
 
 

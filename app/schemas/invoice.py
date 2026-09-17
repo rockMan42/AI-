@@ -16,6 +16,10 @@ FIELD_LABELS = {
     "buyer_tax_id": "购买方税号",
     "seller_name": "销售方名称",
     "items_description": "商品或服务",
+    "expense_city": "费用发生城市",
+    "service_start_date": "服务开始日期",
+    "service_end_date": "服务结束日期",
+    "transport_seat": "交通座席/舱位",
 }
 
 class InvoiceFields(BaseModel):
@@ -30,6 +34,10 @@ class InvoiceFields(BaseModel):
     buyer_tax_id: str | None = None
     seller_name: str | None = None
     items_description: str | None = None
+    expense_city: str | None = None
+    service_start_date: str | None = None
+    service_end_date: str | None = None
+    transport_seat: str | None = None
 
 class InvoiceOCRResult(InvoiceFields):
     confidence: dict[str, float] = Field(default_factory=dict)
@@ -54,6 +62,5 @@ class InvoiceConfirmInput(BaseModel):
     index: int = Field(ge=1, le=10)
     action: Literal["confirm"] = "confirm"
     corrections: dict[str, Any] = Field(default_factory=dict)
-
 
 

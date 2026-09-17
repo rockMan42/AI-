@@ -37,6 +37,8 @@ def invoice_card(
 ) -> dict:
     low_fields = set(item.get("low_confidence_fields", []))
     lines = []
+    if item.get("invoice_id"):
+        lines.append(f"发票ID：{item['invoice_id']}")
 
     for name, label in FIELD_LABELS.items():
         value = item.get(name)
@@ -148,4 +150,34 @@ def summary_card(
         ],
     )
     result["config"]["update_multi"] = True
+
+    invoice_ids = [
+        str(item["invoice_id"])
+        for item in batch.get("results", [])
+        if item.get("invoice_id")
+    ]
+
+    if invoice_ids:
+        result["elements"].append({
+            "tag": "div",
+            "text": {
+                "tag": "plain_text",
+                "content": (
+                    f"本批发票ID：{','.join(invoice_ids)}\n"
+                    "全部确认后，系统会自动识别费用信息并推荐出差申请。\n"
+                    "只有无法自动识别时才需要手动补充。\n\n"
+                    "备用操作示例：\n"
+                    f"补充报销 {invoice_ids[0]}\n"
+                    "费用类型：住宿\n"
+                    "城市：上海\n"
+                    "入住日期：2026-09-10\n"
+                    "退房日期：2026-09-12\n\n"
+                    "餐饮只需填写费用类型；火车、飞机还需填写座席。\n"
+                    "补充完成后可发送：生成报销 出差ID 发票ID列表\n"
+                    "例如：生成报销 501 101,102\n"
+                    "可以跨批次选择发票；不需要报销的发票不选即可。"
+                ),
+            },
+        })
+
     return result

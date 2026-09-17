@@ -29,6 +29,10 @@ buyer_name：购买方名称；
 buyer_tax_id：购买方税号；
 seller_name：销售方名称；
 items_description：商品或服务简要描述；
+expense_city：费用发生城市，无法识别返回 null；
+service_start_date：住宿入住日期或服务开始日期，YYYY-MM-DD；
+service_end_date：住宿退房日期或服务结束日期，YYYY-MM-DD；
+transport_seat：火车座席或飞机舱位，无法识别返回 null；
 confidence：上述每个字段的自评置信度，数值范围为 0 到 1。
 
 金额返回数字，其他字段返回字符串，代码和号码保留前导零。
@@ -71,7 +75,11 @@ def normalize_value(name: str, value):
     if not value:
         return None
 
-    if name == "invoice_date":
+    if name in {
+        "invoice_date",
+        "service_start_date",
+        "service_end_date",
+    }:
         try:
             return date.fromisoformat(value).isoformat()
         except ValueError:
@@ -235,5 +243,4 @@ class InvoiceOCRService:
             raise ValueError("模型返回空内容")
 
         return text
-
 

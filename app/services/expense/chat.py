@@ -92,6 +92,7 @@ async def finish_flow(user_id: int, batch: dict):
     if summary["confirmed_count"] != summary["total_count"]:
         return
 
+    updated = False
     try:
         async with asyncio.timeout(0.3):
             store = SessionStore()
@@ -108,14 +109,29 @@ async def finish_flow(user_id: int, batch: dict):
                 and slot
                 and slot.value == batch["request_id"]
             ):
-                session.status = "completed"
-                session.state = "completed"
-                session.workflow_state = "completed"
+                # OCR 确认完成，只结束识别阶段。
+                # 继续允许上传，也允许通过发票ID明确选择本次报销范围。
+                session.status = "awaiting_confirmation"
+                session.state = "matched"
+                session.workflow_state = "matched"
                 session.pending_slot = None
                 await store.save(session)
+                updated = True
 
     except Exception:
         log.warning("invoice_session_finish_failed")
+
+    if updated:
+        try:
+            from app.services.expense.auto_flow import (
+                start_auto_expense_flow,
+            )
+            await start_auto_expense_flow(user_id, batch)
+        except Exception:
+            log.exception(
+                "expense_auto_flow_failed request_id=%s",
+                batch["request_id"],
+            )
 
 
 async def handle_invoice_text(
