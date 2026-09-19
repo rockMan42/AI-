@@ -40,3 +40,4 @@ mcp_servers:
       include:
         - submit_expense
         - query_expense
+        - query_expense_status

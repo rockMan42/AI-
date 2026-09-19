@@ -1,0 +1,18 @@
+name: expense_status_query
+display_name: "查询报销进度"
+description: "查询员工自己的报销审批进度和审批记录，不办理新报销"
+triggers:
+  - "我的报销单到哪了"
+  - "报销进度"
+  - "报销审批"
+  - "报销到账了吗"
+  - "查看报销记录"
+priority: 20
+
+slots:
+  - name: expense_id
+    type: integer
+    required: false
+    default: null
+    description: "报销单数据库ID；未指定时查询最近提交的一单"
+    follow_up_prompt: "请提供报销单编号"

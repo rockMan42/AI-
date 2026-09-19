@@ -88,3 +88,4 @@ class FinanceExpenseMock(Base):
     payload_hash: Mapped[str] = mapped_column(String(64))
     payload: Mapped[dict] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(30))
+    approval_state: Mapped[dict | None] = mapped_column(JSON)

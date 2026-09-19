@@ -16,6 +16,9 @@ SUPPORTED_TYPES = {
     "HOLIDAY_NOTICE_PUSH",
     "RECEIPT_REMINDER",
     "APPROVAL_POLL",
+    "EXPENSE_APPROVAL_POLL",
+    "EXPENSE_TIMEOUT_SCAN",
+    "EXPENSE_NOTIFICATION_DELIVERY",
 }
 
 _worker = None
@@ -235,6 +238,15 @@ async def execute_task(task_id: str, *, force: bool = False):
             force=force,
         )
 
+    if task["task_type"].startswith("EXPENSE_"):
+        from app.services.expense.approval_cron import (
+            execute_expense_task,
+        )
+        return await execute_expense_task(
+            task_id,
+            force=force,
+        )
+
     notice_id = int(task["payload"]["notice_id"])
 
     async with notice_lease(notice_id):
@@ -326,7 +338,22 @@ async def _worker_loop():
                     )
 
             if time.monotonic() >= next_reconcile:
-                await reconcile_published()
+                from app.services.expense.approval_cron import (
+                    reconcile_tasks,
+                )
+
+                # 某一业务恢复失败，不阻断其他业务的恢复。
+                for reconcile in (reconcile_published, reconcile_tasks):
+                    try:
+                        await reconcile()
+                    except Exception as exc:
+                        log.error(
+                            "cron_reconcile_failed "
+                            "handler=%s error_type=%s",
+                            reconcile.__name__,
+                            type(exc).__name__,
+                        )
+
                 next_reconcile = time.monotonic() + 30
         except Exception as exc:
             log.error(

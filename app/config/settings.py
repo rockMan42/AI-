@@ -179,6 +179,7 @@ class Settings(BaseSettings):
     # 仅允许开发环境使用状态模拟接口
     requisition_mock_enabled: bool = False
 
+
     # 发票 OCR
     invoice_ocr_model: str = "qwen-vl-max"
     invoice_ocr_api_url: str = (
@@ -190,6 +191,9 @@ class Settings(BaseSettings):
         gt=0,
         le=1,
     )
+
+    # 默认关闭，仅用于本地开发验收。
+    expense_mock_enabled: bool = True
 
     # 指定了 env_file = ".env"，就不再需要手动 load_dotenv() 了, 启动时自动读取.env配置
     model_config = {

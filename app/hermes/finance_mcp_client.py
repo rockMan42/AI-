@@ -50,7 +50,11 @@ async def call_finance_tool(
     user_id: int,
     expense_id: int,
 ) -> dict:
-    if tool_name not in {"submit_expense", "query_expense"}:
+    if tool_name not in {
+        "submit_expense",
+        "query_expense",
+        "query_expense_status",
+    }:
         raise FinanceMCPError("不支持的财务工具")
 
     name = f"mcp__{SERVER_NAME}__{tool_name}"
@@ -73,5 +77,5 @@ async def call_finance_tool(
     except FinanceMCPError:
         raise
     except Exception:
-        raise FinanceMCPError("财务提交结果暂未确认") from None
+        raise FinanceMCPError("财务调用结果暂未确认") from None
 

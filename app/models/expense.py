@@ -42,7 +42,8 @@ class Expense(Base):
         Numeric(12, 2), server_default="0.00",
     )
     status: Mapped[str] = mapped_column(
-        String(20), server_default="draft",
+        String(30),
+        server_default="draft",
     )
     submitter_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("t_user.user_id"),
@@ -76,6 +77,25 @@ class Expense(Base):
     notified: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0",
     )
+    # 不修改原 approver_id，避免改变已经提交财务的原始快照。
+    current_approver_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("t_user.user_id"),
+    )
+    approval_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    node_started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    approval_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime)
+    paid_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+
+    # 原单保持退回状态，通过此字段记录已经开放修改。
+    correction_opened_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class ExpenseItem(Base):

@@ -15,9 +15,14 @@ from app.schemas.expense import (
     ExpenseSubmitInput,
     ExpenseSupplement,
 )
+from app.services.expense.approval_service import approval_detail
 from app.security.auth import get_current_user, require_admin
 from app.services.expense.expense_service import ExpenseService
 from app.services.expense.rules import ExpenseError
+from app.services.expense.approval_mock import (
+    MockApprovalInput,
+    advance_mock,
+)
 
 router = APIRouter()
 service = ExpenseService()
@@ -34,6 +39,17 @@ async def invoke(operation):
     except Exception:
         log.exception("expense_api_failed")
         raise HTTPException(503, "报销服务暂不可用") from None
+
+
+@router.post("/admin/expense/{expense_id}/mock-approval")
+async def mock_approval(
+    expense_id: int,
+    body: MockApprovalInput,
+    user: User = Depends(require_admin),
+):
+    return await invoke(
+        advance_mock(user.user_id, expense_id, body)
+    )
 
 @router.put("/expense/invoices/{invoice_id}/supplement")
 async def supplement(
@@ -176,5 +192,58 @@ async def update_policy(
 ):
     return await invoke(service.save_policy(user.user_id, body))
 
+@router.get("/expense/{expense_id}/approval-status")
+async def approval_status(
+    expense_id: int,
+    user: User = Depends(get_current_user),
+):
+    return await invoke(
+        approval_detail(user.user_id, expense_id)
+    )
 
+
+@router.post("/expense/{expense_id}/reopen")
+async def reopen(
+    expense_id: int,
+    user: User = Depends(get_current_user),
+):
+    return await invoke(
+        service.reopen_rejected(user.user_id, expense_id)
+    )
+
+
+from typing import Literal
+
+from app.config.settings import get_settings
+from app.services.expense.approval_cron import (
+    execute_expense_task,
+    reconcile_tasks,
+)
+
+
+@router.post("/admin/expense-test/run/{kind}")
+async def run_expense_test_task(
+    kind: Literal["poll", "notify", "timeout"],
+    user: User = Depends(require_admin),
+):
+    if not get_settings().expense_mock_enabled:
+        raise HTTPException(404, "测试入口未开启")
+
+    task_ids = {
+        "poll": "EXPENSE_APPROVAL_POLL",
+        "notify": "EXPENSE_NOTIFICATION_DELIVERY",
+        "timeout": "EXPENSE_TIMEOUT_SCAN",
+    }
+
+    async def operation():
+        await reconcile_tasks()
+        result = await execute_expense_task(
+            task_ids[kind],
+            force=True,
+        )
+        if result.get("status") != "PENDING":
+            raise ExpenseError("测试任务执行失败，请检查日志", 503)
+        return result
+
+    return await invoke(operation())
 

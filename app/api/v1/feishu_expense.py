@@ -9,7 +9,7 @@ from app.services.expense.expense_chat import expense_card
 from app.services.expense.expense_service import ExpenseService
 from app.services.expense.rules import ExpenseError
 from app.schemas.expense import ExpensePrepareInput
-
+from app.services.expense.cards import card, safe_text
 
 log = logging.getLogger(__name__)
 service = ExpenseService()
@@ -121,7 +121,7 @@ async def handle_expense_card_data(data):
     if (
         type(expense_id) is not int
         or expense_id <= 0
-        or operation not in {"confirm", "cancel"}
+        or operation not in {"confirm", "cancel", "resubmit"}
     ):
         log.warning(
             "expense_card_invalid operation=%s keys=%s",
@@ -136,6 +136,33 @@ async def handle_expense_card_data(data):
     try:
         async with asyncio.timeout(2):
             user = await callback_actor(open_id)
+            if operation == "resubmit":
+                result = await service.reopen_rejected(
+                    user.user_id, expense_id,
+                )
+                ids = ",".join(map(str, result["invoice_ids"]))
+                trip = result["trip_id"] or "无"
+                content = (
+                        result["message"]
+                        + f"\n原发票ID：{ids}"
+                        + f"\n修改后可发送：生成报销 {trip} {ids}"
+                )
+                return {
+                    "toast": {
+                        "type": "success",
+                        "content": "已开放修改，请修改后重新确认提交",
+                    },
+                    "card": {
+                        "type": "raw",
+                        "data": card(
+                            "修改并重新办理报销",
+                            [{
+                                "tag": "markdown",
+                                "content": safe_text(content),
+                            }],
+                        ),
+                    },
+                }
             if operation == "confirm":
                 result = await service.submit(user.user_id, expense_id)
             else:

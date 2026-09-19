@@ -23,7 +23,11 @@ from tools.registry import registry
 
 
 FINANCE_SERVER_NAME = "finance_expense_mcp"
-FINANCE_TOOL_NAMES = ("submit_expense", "query_expense")
+FINANCE_TOOL_NAMES = (
+    "submit_expense",
+    "query_expense",
+    "query_expense_status",
+)
 
 _agent_settings: Settings | None = None
 _knowledge_client: KnowledgeMCPClient | None = None

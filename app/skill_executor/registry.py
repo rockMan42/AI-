@@ -11,6 +11,10 @@ from app.skill_executor.holiday import (
     ReceiptConfirmExecutor,
     HolidayQueryExecutor,
 )
+from app.skill_executor.expense import (
+    ExpenseSkillExecutor,
+    ExpenseStatusQueryExecutor,
+)
 
 class ExecutorRegistry:
 
@@ -27,6 +31,7 @@ class ExecutorRegistry:
             "receipt_confirm": ReceiptConfirmExecutor(),
             "holiday_notice_query": HolidayQueryExecutor(),
             "requisition_status_query": RequisitionStatusQueryExecutor(),
+            "expense_status_query": ExpenseStatusQueryExecutor(),
         }
 
     def get_executor(self,executor_name: str) -> BaseSkillExecutor | None:

@@ -28,6 +28,10 @@ from app.models.leave_workflow import (
     WorkCalendarDay,
 )
 from app.models.expense import Expense, ExpenseItem, Invoice
+from app.models.expense_approval import (
+    ExpenseApprovalLog,
+    ExpenseNotification,
+)
 
 """
 统一导入入口：其他代码可以写 from app.models import HolidayNotice。

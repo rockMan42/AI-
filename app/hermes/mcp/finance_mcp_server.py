@@ -12,6 +12,11 @@ from app.models import User, Expense, FinanceExpenseMock
 from app.security.auth import ACTIVE_STATUSES
 from app.security.expense import verify_finance_token
 from app.services.expense.rules import ExpenseError, digest
+from app.services.expense.approval_state import (
+    POLL_STATUSES,
+    TERMINAL_STATUSES,
+)
+from app.utils.time import as_utc, utc_now
 
 
 @asynccontextmanager
@@ -28,11 +33,20 @@ mcp_server = FastMCP(
 )
 
 def receipt_data(row):
+    state = row.approval_state
+    if not state:
+        raise ExpenseError(
+            "历史财务单缺少审批基线，请先核对并补齐历史数据",
+            409,
+        )
+
     return {
         "expense_id": row.expense_id,
         "finance_no": row.finance_no,
         "status": row.status,
         "payload_hash": row.payload_hash,
+        "initial_approver_id": state["initial_approver_id"],
+        "submitted_at": state["submitted_at"],
     }
 
 async def authorize(db, identity_token, expense_id):
@@ -63,9 +77,9 @@ async def submit_expense(
         async with create_session() as db, db.begin():
             expense = await authorize(db, identity_token, expense_id)
 
-            if expense.status not in {
-                "submitting", "submitted", "approved", "paid",
-            }:
+            if expense.status not in (
+                    {"submitting"} | POLL_STATUSES | TERMINAL_STATUSES
+            ):
                 raise ExpenseError("报销单尚未由员工确认提交")
 
             if not expense.payload:
@@ -93,16 +107,32 @@ async def submit_expense(
                     raise ExpenseError("相同报销单的提交内容发生变化")
                 return receipt_data(existing)
 
+            approver = await db.get(User, expense.approver_id)
+            if (
+                    approver is None
+                    or approver.status not in ACTIVE_STATUSES
+                    or approver.user_id == expense.user_id
+            ):
+                raise ExpenseError("未配置有效的直属主管")
+
+            submitted_at = as_utc(utc_now()).isoformat()
+
             row = FinanceExpenseMock(
                 expense_id=expense_id,
                 finance_no="FIN-" + uuid4().hex.upper(),
                 payload_hash=payload_hash,
                 payload=payload,
-                status=(
-                    "pending_manager"
-                    if expense.has_override
-                    else "pending_finance"
-                ),
+                status="submitted",
+                approval_state={
+                    "version": 0,
+                    "initial_approver_id": approver.user_id,
+                    "current_approver_id": approver.user_id,
+                    "submitted_at": submitted_at,
+                    "node_started_at": submitted_at,
+                    "paid_at": None,
+                    "paid_amount": None,
+                    "events": [],
+                },
             )
             db.add(row)
             await db.flush()
@@ -135,7 +165,34 @@ async def query_expense(
     except ExpenseError as exc:
         raise ToolError(str(exc)) from None
 
+@mcp_server.tool(name="query_expense_status")
+async def query_expense_status(
+    expense_id: int,
+    identity_token: str,
+) -> dict:
+    """返回完整审批事件，避免两次轮询之间的中间节点丢失。"""
+    try:
+        async with create_session() as db, db.begin():
+            await authorize(db, identity_token, expense_id)
 
+            row = await db.scalar(
+                select(FinanceExpenseMock).where(
+                    FinanceExpenseMock.expense_id == expense_id,
+                )
+            )
+            if row is None:
+                raise ExpenseError("财务系统尚未接收该报销单", 404)
+            if not row.approval_state:
+                raise ExpenseError("历史财务单缺少审批基线", 409)
+
+            return {
+                "expense_id": expense_id,
+                "status": row.status,
+                **row.approval_state,
+            }
+    except ExpenseError as exc:
+        raise ToolError(str(exc)) from None
+    
 
 if __name__ == "__main__":
     logging.basicConfig(

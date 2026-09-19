@@ -5,7 +5,10 @@ from uuid import uuid4
 from pydantic import ValidationError
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
-
+from app.services.expense.approval_state import (
+    POLL_STATUSES,
+    REJECTED_STATUSES,
+)
 from app.core.database import create_session
 from app.models import Department, Expense, ExpenseItem, Invoice, User
 from app.models.expense_flow import (
@@ -43,8 +46,16 @@ CATEGORY = {
 }
 
 ACTIVE_EXPENSE_STATUSES = {
-    "draft", "submitting", "submitted",
-    "approved", "rejected", "paid",
+    "draft",
+    "submitting",
+    "submitted",
+    "manager_approved",
+    "finance_approved",
+    "manager_rejected",
+    "finance_rejected",
+    "rejected",
+    "approved",  # 保留历史数据的防重复校验。
+    "paid",
 }
 
 def detail_data(row: Expense) -> dict:
@@ -189,6 +200,7 @@ class ExpenseService:
                     Expense.user_id == user.user_id,
                     Expense.trip_id == trip.id,
                     Expense.status.in_(ACTIVE_EXPENSE_STATUSES),
+                    Expense.correction_opened_at.is_(None),
                     ExpenseItem.category.in_(["meals", "餐饮"]),
                 )
             )
@@ -265,6 +277,7 @@ class ExpenseService:
                 .where(
                     ExpenseItem.invoice_no == str(ocr["invoice_number"]).strip(),
                     Expense.status.in_(ACTIVE_EXPENSE_STATUSES),
+                    Expense.correction_opened_at.is_(None),
                 )
             )
             if current_expense_id is not None:
@@ -477,24 +490,22 @@ class ExpenseService:
                 ):
                     return {"status": "validation_failed", **report}
 
-                approver_id = None
-                if override:
-                    department = await db.get(
-                        Department, user.department_id,
-                    )
-                    approver_id = (
-                        department.manager_user_id if department else None
-                    )
-                    approver = (
-                        await db.get(User, approver_id)
-                        if approver_id else None
-                    )
-                    if (
-                            approver is None
-                            or approver.status not in ACTIVE_STATUSES
-                            or approver.user_id == user_id
-                    ):
-                        raise ExpenseError("未配置有效的超标审批主管")
+                department = await db.get(
+                    Department, user.department_id,
+                )
+                approver_id = (
+                    department.manager_user_id if department else None
+                )
+                approver = (
+                    await db.get(User, approver_id)
+                    if approver_id else None
+                )
+                if (
+                        approver is None
+                        or approver.status not in ACTIVE_STATUSES
+                        or approver.user_id == user_id
+                ):
+                    raise ExpenseError("未配置有效的直属主管")
 
                 row = Expense(
                     user_id=user_id,
@@ -558,9 +569,9 @@ class ExpenseService:
                 db, user_id, expense_id, lock=True,
             )
 
-            if row.status in {
-                "submitting", "submitted", "approved", "paid",
-            }:
+            if row.status in (
+                    {"submitting", "approved", "paid"} | POLL_STATUSES
+            ):
                 return detail_data(row)
             if row.status != "draft" or not row.payload:
                 raise ExpenseError("当前报销单不能提交")
@@ -584,10 +595,15 @@ class ExpenseService:
             ):
                 raise ExpenseError("报销校验未通过")
 
-            if row.has_override:
-                approver = await db.get(User, row.approver_id)
-                if approver is None or approver.status not in ACTIVE_STATUSES:
-                    raise ExpenseError("超标审批主管已失效，请重新生成草稿")
+            approver = await db.get(User, row.approver_id)
+            if (
+                    approver is None
+                    or approver.status not in ACTIVE_STATUSES
+                    or approver.user_id == user_id
+            ):
+                raise ExpenseError(
+                    "直属主管已失效，请取消草稿后重新生成",
+                )
 
             # 此事务只记录员工确认，不调用外部系统。
             row.status = "submitting"
@@ -732,3 +748,55 @@ class ExpenseService:
             policy.config_json = data
             policy.revision += 1
             return {"revision": policy.revision, **data}
+
+    async def reopen_rejected(self, user_id, expense_id):
+        async with create_session() as db, db.begin():
+            # 与 prepare/submit/cancel 保持一致的锁顺序。
+            await locked_policy(db)
+            await locked_user(db, user_id)
+            row = await owned_expense(
+                db, user_id, expense_id, lock=True,
+            )
+
+            if row.status not in REJECTED_STATUSES:
+                raise ExpenseError("只有已退回的报销单可以重新办理")
+
+            invoice_ids = (row.payload or {}).get("invoice_ids", [])
+
+            if row.correction_opened_at is None:
+                item_ids = list((await db.scalars(
+                    select(ExpenseItem.id)
+                    .where(ExpenseItem.expense_id == row.id)
+                )).all())
+
+                invoices = list((await db.scalars(
+                    select(Invoice)
+                    .where(Invoice.expense_item_id.in_(item_ids))
+                    .order_by(Invoice.id)
+                    .with_for_update()
+                )).all())
+
+                for invoice in invoices:
+                    invoice.expense_item_id = None
+
+                # 这里只释放业务占用，不删除原单、明细和审批日志。
+                await db.execute(
+                    delete(ExpenseInvoiceClaim).where(
+                        ExpenseInvoiceClaim.expense_id == row.id,
+                    )
+                )
+
+                row.source_key = None
+                row.correction_opened_at = utc_now()
+
+            return {
+                "expense_id": row.id,
+                "invoice_ids": invoice_ids,
+                "trip_id": row.trip_id,
+                "message": (
+                    "原报销单和审批记录已保留，发票占用已释放。"
+                    "补充费用信息后，请重新生成并确认报销单。"
+                    "如果需要更换发票，请先发送“我要报销”，"
+                    "再上传更正后的发票。"
+                ),
+            }

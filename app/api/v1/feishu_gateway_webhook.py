@@ -295,7 +295,7 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
                 "p2p",
             )
             return response.success_response("报销命令已处理")
-        
+
     try:
         receipt_reply = await try_handle_receipt_text(
             user, text, message_id,
@@ -776,6 +776,7 @@ async def handle_skill_action(
             "holiday_notice_create",
             "requisition_apply",
             "expense_reimburse",
+            "expense_status_query",
         }
                 and skill_result.data.get("awaiting_confirmation")
         ):

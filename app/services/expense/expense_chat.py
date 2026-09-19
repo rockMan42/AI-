@@ -1,6 +1,11 @@
 import re
 from datetime import date
-
+from app.services.expense.approval_cards import query_card
+from app.services.expense.approval_service import (
+    approval_detail,
+    latest_expense_id,
+)
+from app.services.expense.approval_state import STATUS_LABELS
 from app.schemas.expense import ExpensePrepareInput, ExpenseSupplement
 from app.services.expense.cards import card, safe_text
 from app.services.expense.expense_service import ExpenseService
@@ -37,15 +42,7 @@ SEAT_NAMES = {
     "软卧": "soft_sleeper",
 }
 
-STATUS_NAMES = {
-    "draft": "待确认",
-    "submitting": "正在提交财务",
-    "submitted": "已提交财务",
-    "cancelled": "已取消",
-    "approved": "已审批",
-    "rejected": "已驳回",
-    "paid": "已支付",
-}
+STATUS_NAMES = STATUS_LABELS
 
 
 def expense_card(data: dict):
@@ -128,6 +125,41 @@ def expense_card(data: dict):
 
 
 async def handle_expense_text(user_id: int, text: str):
+    text = text.strip()
+
+    if text in {
+        "我的报销单到哪了",
+        "我的报销单到哪了？",
+        "我的报销单到哪了?",
+        "报销进度",
+        "查询报销进度",
+    }:
+        expense_id = await latest_expense_id(user_id)
+        if expense_id is None:
+            return "暂无已提交的报销单。"
+        return query_card(
+            await approval_detail(user_id, expense_id)
+        )
+
+    match = re.fullmatch(r"查询报销进度\s+(\d+)", text)
+    if match:
+        return query_card(
+            await approval_detail(user_id, int(match[1]))
+        )
+
+    match = re.fullmatch(r"重新报销\s+(\d+)", text)
+    if match:
+        result = await service.reopen_rejected(
+            user_id, int(match[1]),
+        )
+        ids = ",".join(map(str, result["invoice_ids"]))
+        trip = result["trip_id"] or "无"
+        return (
+            result["message"]
+            + f"\n原发票ID：{ids}"
+            + f"\n修改后可发送：生成报销 {trip} {ids}"
+        )
+
     if text == "我的出差":
         trips = await service.trips(user_id)
         if not trips:
@@ -142,12 +174,19 @@ async def handle_expense_text(user_id: int, text: str):
         r"(查询报销|取消报销)\s+(\d+)",
         text,
     )
+    match = re.fullmatch(
+        r"(查询报销|取消报销)\s+(\d+)",
+        text,
+    )
     if match:
-        method = (
-            service.detail if match[1] == "查询报销"
-            else service.cancel
+        expense_id = int(match[2])
+        if match[1] == "查询报销":
+            return query_card(
+                await approval_detail(user_id, expense_id)
+            )
+        return expense_card(
+            await service.cancel(user_id, expense_id)
         )
-        return expense_card(await method(user_id, int(match[2])))
 
     if text.startswith("补充报销"):
         lines = text.strip().splitlines()
