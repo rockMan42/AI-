@@ -1,38 +1,78 @@
 name: lead_query
 display_name: "查询客户线索"
-description: "查询分配给当前用户的客户线索及跟进状态，支持按状态、优先级、时间范围筛选"
+description: >
+  查询客户线索；默认查询本人。
+  正在跟进对应 contacted，新进线索对应 new。
+  超期线索使用 view=overdue。
+  按优先级排序使用 sort_by=priority_score。
+  上周新进来的线索使用 time_range=上周、status=new。
+  不用于记录跟进内容。
 triggers:
-  - "线索"
+  - "查询线索"
+  - "查线索"
   - "客户"
   - "商机"
-  - "跟进"
-  - "新线索"
+  - "超期线索"
 priority: 10
 slots:
+  - name: assigned_to
+    type: integer
+    required: false
+    description: "负责人用户ID；没有明确ID时不要猜测"
+  - name: team
+    type: boolean
+    required: false
+    default: false
+    description: "是否查询团队线索，仅用户明确要求团队时为true"
   - name: status
     type: string
     required: false
-    default: null
-    follow_up_prompt: "需要筛选哪种线索状态？（new/contacted/qualified/proposed/won/lost）"
-    description: "线索状态，对应 t_lead.status"
-    enum: ["new", "contacted", "qualified", "proposed", "won", "lost"]
+    description: "new/contacted/qualified/proposal/won/lost，多选用逗号分隔"
   - name: priority
     type: string
     required: false
-    default: null
-    follow_up_prompt: "需要筛选哪个优先级？（高/中/低）"
-    description: "优先级筛选，对应 t_lead.priority"
-    enum: ["高", "中", "低"]
-  - name: time_range
+    description: "高=high，中=medium，低=low"
+    enum: ["high", "medium", "low"]
+  - name: source
     type: string
     required: false
-    default: null
-    follow_up_prompt: "需要查询哪个时间范围？（今天/本周/本月/最近7天）"
-    description: "时间范围筛选，用于过滤 t_lead.created_at 或 t_lead.next_followup"
-    enum: ["今天", "本周", "本月", "最近7天"]
+    description: "线索来源"
+    enum: ["website", "referral", "exhibition", "cold_call"]
   - name: company_name
     type: string
     required: false
-    default: null
-    follow_up_prompt: "请提供要查询的客户公司名称"
-    description: "按客户公司名称模糊搜索，对应 t_lead.company_name"
+    description: "客户公司名称"
+  - name: time_range
+    type: string
+    required: false
+    description: "相对时间范围；填写后不要同时填写date_from和date_to"
+    enum: ["今天", "本周", "上周", "本月", "最近7天"]
+  - name: date_from
+    type: date
+    required: false
+    description: "创建时间起始日期，YYYY-MM-DD"
+  - name: date_to
+    type: date
+    required: false
+    description: "创建时间截止日期，YYYY-MM-DD，包含当天"
+  - name: last_follow_before
+    type: date
+    required: false
+    description: "最近跟进早于指定日期，YYYY-MM-DD"
+  - name: view
+    type: string
+    required: false
+    default: all
+    description: "全部all、超期overdue、高意向high_intent、今明到期due_soon"
+    enum: ["all", "overdue", "high_intent", "due_soon"]
+  - name: sort_by
+    type: string
+    required: false
+    default: default
+    description: "用户明确要求优先级排序时使用priority_score"
+    enum: ["default", "priority_score"]
+  - name: page
+    type: integer
+    required: false
+    default: 1
+    description: "页码，从1开始"

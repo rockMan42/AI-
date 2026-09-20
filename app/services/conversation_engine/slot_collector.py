@@ -35,6 +35,31 @@ class SlotCollector:
         if slot is None or slot.filled or not text:
             return None
 
+        if session.intent_code == "lead_follow_up":
+            if session.pending_slot == "follow_up_type":
+                methods = {
+                    "电话": "phone", "邮件": "email", "拜访": "visit",
+                    "微信": "wechat", "演示": "demo",
+                }
+                method = re.fullmatch(
+                    r"(?:通过|使用|用)?(电话|邮件|拜访|微信|演示)(?:跟进)?[。！!]?",
+                    text,
+                )
+                if method:
+                    return {"follow_up_type": methods[method.group(1)]}
+                # 用户也可以在回答方式时，一次提供完整的跟进信息。
+                method = re.match(
+                    r"^(?:这次|本次)?(?:通过|使用|用)"
+                    r"(电话|邮件|拜访|微信|演示)(?:跟进|联系|沟通)",
+                    text,
+                )
+                if method:
+                    values = self._extract_lead_follow_up_reply(text)
+                    values["follow_up_type"] = methods[method.group(1)]
+                    return values
+            if session.pending_slot == "content":
+                return self._extract_lead_follow_up_reply(text)
+
         if session.intent_code == "requisition_apply":
             requisition_slots = self._extract_requisition_reply(
                 session,
@@ -53,6 +78,47 @@ class SlotCollector:
             return None
 
         return {slot.name: raw_value}
+
+    @staticmethod
+    def _extract_lead_follow_up_reply(text: str) -> dict:
+        fields = {
+            "下一步行动": "next_action",
+            "下一步": "next_action",
+            "下次跟进时间": "next_follow_up",
+            "跟进结果": "outcome",
+        }
+        parts = re.split(
+            r"(?:[，,。；;\n]\s*|^)(下一步行动|下一步|下次跟进时间|跟进结果)"
+            r"\s*(?:是|为|[:：])?\s*",
+            text,
+        )
+        result = {}
+        content = parts[0].strip(" ，,。；;\n")
+        if content:
+            result["content"] = content
+        for index in range(1, len(parts), 2):
+            field = fields[parts[index]]
+            value = parts[index + 1].strip(" ，,。；;\n")
+            if not value:
+                raise ValueError(f"请补充{parts[index]}。")
+            if field == "next_follow_up":
+                value = value.replace("年", "-").replace("月", "-").replace("日", "")
+                try:
+                    value = datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
+                except ValueError:
+                    raise ValueError(
+                        "下次跟进时间无法识别，请重新发送本次跟进内容，"
+                        "并使用日期格式，例如：下次跟进时间是2026-11-30。"
+                    ) from None
+            if field == "outcome":
+                value = {
+                    "积极": "positive", "一般": "neutral",
+                    "消极": "negative", "未接通": "no_answer",
+                }.get(value, value)
+                if value not in {"positive", "neutral", "negative", "no_answer"}:
+                    raise ValueError("跟进结果请填写积极、一般、消极或未接通，并重新发送跟进内容。")
+            result[field] = value
+        return result
 
     def _extract_requisition_reply(
         self,

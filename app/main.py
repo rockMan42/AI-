@@ -14,6 +14,7 @@ from app.services.knowledge.document_cleanup import (
     start_cleanup_worker,
     stop_cleanup_worker,
 )
+from app.api.v1 import lead
 from app.api.v1 import base_call_back
 from app.api.v1 import expense
 from app.services.expense.delivery import ExpenseDelivery
@@ -132,7 +133,7 @@ app.include_router(requisition.router, prefix=settings.app_prefix, tags=["requis
 app.include_router(invoice.router, prefix=settings.app_prefix, tags=["invoice"],)
 app.include_router(expense.router,prefix=settings.app_prefix,tags=["expense"],)
 app.include_router(base_call_back.router, prefix=settings.app_prefix, tags=["feishu_callback"],)
-
+app.include_router(lead.router, prefix=settings.app_prefix, tags=["lead"],)
 # 应用启动时注册skill
 register = get_skill_register()
 register.load_from_directory("./app/hermes/skills")

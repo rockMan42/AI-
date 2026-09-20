@@ -564,7 +564,12 @@ async def try_handle_pending_slot(
     if skill is None:
         return None
 
-    slots = slot_collector.parse_pending_slot_reply(session, text)
+    try:
+        slots = slot_collector.parse_pending_slot_reply(session, text)
+    except ValueError as exc:
+        if session.intent_code != "lead_follow_up":
+            raise
+        return str(exc)
     if slots is None:
         return None
 
@@ -662,6 +667,13 @@ def has_explicit_intent_switch(
 ) -> bool:
     """用其他 Skill 的明确触发词识别用户主动切换业务。"""
     normalized = str(text or "").strip()
+    if active_intent == "lead_follow_up" and not re.match(
+        r"^(?:请|麻烦)?(?:帮我|给我)?(?:先|改为|换成|我要|我想)?"
+        r"(?:查|查看|查询|统计|申请|请假|报销|按优先级|取消|切换)",
+        normalized,
+    ):
+        # 跟进正文中的“客户”等业务词不代表用户切换了意图。
+        return False
     for skill in register.get_all_skills().values():
         if skill.name == active_intent:
             continue
@@ -978,7 +990,7 @@ def build_intent_system_prompt(
         )
 
     continuation_context = _build_continuation_context(session)
-    today = date.today().isoformat()
+    today = now_shanghai().date().isoformat()
 
     return f"""
 你是 AI 数字员工平台的意图分类器和槽位提取器。

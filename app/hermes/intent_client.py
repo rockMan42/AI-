@@ -20,7 +20,10 @@ def classify_intent(
         api_key=settings.dashscope_api_key,
         base_url=AGENT_BASE_URL,
         max_retries=0,
-        timeout=httpx.Timeout(settings.intent_timeout_seconds, connect=1.0),
+        timeout=httpx.Timeout(
+            settings.intent_timeout_seconds,
+            connect=min(5.0, settings.intent_timeout_seconds),
+        ),
     ) as client:
         with phase("intent_completion") as metrics:
             response = client.chat.completions.create(

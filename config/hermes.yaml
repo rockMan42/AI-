@@ -41,3 +41,15 @@ mcp_servers:
         - submit_expense
         - query_expense
         - query_expense_status
+  crm_lead_mcp:
+    command: python
+    args:
+      - "-m"
+      - "app.hermes.mcp.crm_mcp_server"
+    connect_timeout: 30
+    timeout: 15
+    tools:
+      include:
+        - query_leads
+        - get_lead_detail
+        - update_follow_up

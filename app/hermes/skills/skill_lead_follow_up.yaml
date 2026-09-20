@@ -1,0 +1,41 @@
+name: lead_follow_up
+display_name: "记录线索跟进"
+description: >
+  为指定线索记录已经发生的跟进，不用于查询。
+  phone=电话，email=邮件，visit=拜访，wechat=微信，demo=演示。
+  不得编造跟进内容、结果或下次跟进时间。
+triggers:
+  - "记录跟进"
+  - "添加跟进"
+  - "登记跟进"
+priority: 20
+slots:
+  - name: lead_id
+    type: integer
+    required: true
+    description: "线索编号"
+    follow_up_prompt: "请提供要记录跟进的线索编号。"
+  - name: follow_up_type
+    type: string
+    required: true
+    description: "跟进方式"
+    enum: ["phone", "email", "visit", "wechat", "demo"]
+    follow_up_prompt: "这次通过电话、邮件、拜访、微信还是演示进行跟进？"
+  - name: content
+    type: string
+    required: true
+    description: "实际发生的跟进内容"
+    follow_up_prompt: "请填写本次跟进内容；也可以同时说明结果、下一步行动和下次跟进时间。"
+  - name: outcome
+    type: string
+    required: false
+    description: "积极positive、一般neutral、消极negative、未接通no_answer"
+    enum: ["positive", "neutral", "negative", "no_answer"]
+  - name: next_action
+    type: string
+    required: false
+    description: "下一步行动，不超过200字"
+  - name: next_follow_up
+    type: datetime
+    required: false
+    description: "下次跟进时间，ISO格式；无时区时按北京时间解释"

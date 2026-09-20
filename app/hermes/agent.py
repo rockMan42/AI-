@@ -3,7 +3,10 @@ import json
 import os
 import sys
 from pathlib import Path
-
+from app.hermes.crm_mcp_client import (
+    SERVER_NAME as CRM_SERVER_NAME,
+    TOOL_NAMES as CRM_TOOL_NAMES,
+)
 import yaml
 from pydantic import SecretStr
 from run_agent import AIAgent
@@ -55,6 +58,7 @@ def _create_agent(settings: Settings) -> AIAgent:
             f"mcp-{SERVER_NAME}",
             ATTENDANCE_TOOLSET,
             f"mcp-{FINANCE_SERVER_NAME}",
+            f"mcp-{CRM_SERVER_NAME}",
         ],  # 这里禁止分类阶段自由调用考勤 Tool，由现有业务执行器在认证身份明确后调用。Tool 仍然真实注册在 Hermes registry 中，不需要新增 MCP 服务或修改 config/hermes.yaml。
         # skills_dir="app/hermes/skills",
         # tools_dir="app/hermes/tools",
@@ -90,6 +94,12 @@ async def init_hermes_agent(settings: Settings):
             if registry.get_entry(registry_name) is None:
                 raise RuntimeError(
                     f"财务 MCP 工具注册失败: {registry_name}"
+                )
+        for tool_name in CRM_TOOL_NAMES:
+            registry_name = f"mcp__{CRM_SERVER_NAME}__{tool_name}"
+            if registry.get_entry(registry_name) is None:
+                raise RuntimeError(
+                    f"CRM MCP 工具注册失败: {registry_name}"
                 )
 
         _knowledge_client = KnowledgeMCPClient(
@@ -158,6 +168,11 @@ def _mcp_config(settings: Settings) -> dict:
     finance["command"] = sys.executable
     finance["env"] = dict(environment)
     servers[FINANCE_SERVER_NAME] = finance
+
+    crm = dict(servers[CRM_SERVER_NAME])
+    crm["command"] = sys.executable
+    crm["env"] = dict(environment)
+    servers[CRM_SERVER_NAME] = crm
 
     return servers
 

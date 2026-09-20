@@ -56,6 +56,11 @@ async def card_callback(request: Request):
 
         return await handle_expense_card_data(data)
 
+    if value.get("module") == "lead":
+        from app.api.v1.lead import handle_lead_card_data
+
+        return await handle_lead_card_data(data)
+
     open_id = (event.get("operator") or {}).get("open_id", "")
     operation = value.get("action")
 

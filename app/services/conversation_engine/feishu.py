@@ -17,7 +17,7 @@ async def init_feishu_client():
     if _client is None:
         _client = httpx.AsyncClient(
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-            timeout=httpx.Timeout(5.0, connect=1.0, pool=1.0),
+            timeout=httpx.Timeout(5.0, connect=5.0, pool=1.0),
         )
         _token_lock = asyncio.Lock()
 
@@ -68,12 +68,15 @@ async def _fetch_tenant_access_token() -> str:
             "app_id": settings.feishu_app_id,
             "app_secret": settings.feishu_app_secret,
         },
+        timeout=httpx.Timeout(10.0, connect=5.0, pool=2.0),
     )
 
     res.raise_for_status()
     data = res.json()
     if data.get("code") != 0:
-        raise RuntimeError("获取飞书令牌失败")
+        raise RuntimeError(
+            f"获取飞书令牌失败，code={data.get('code')}"
+        )
 
     token = data["tenant_access_token"]
     expire = int(data.get("expire", 7200))

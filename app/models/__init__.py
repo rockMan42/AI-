@@ -27,6 +27,7 @@ from app.models.leave_workflow import (
     LeaveNotification,
     WorkCalendarDay,
 )
+from app.models.lead import Lead, LeadFollowUp
 from app.models.expense import Expense, ExpenseItem, Invoice
 from app.models.expense_approval import (
     ExpenseApprovalLog,

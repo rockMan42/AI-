@@ -6,6 +6,10 @@ from app.skill_executor.performance import PerformanceSkillExecutor
 from app.skill_executor.requisition import RequisitionSkillExecutor, RequisitionStatusQueryExecutor
 from app.skill_executor.lead import LeadSkillExecutor
 from app.skill_executor.expense import ExpenseSkillExecutor
+from app.skill_executor.lead import (
+    LeadSkillExecutor,
+    LeadFollowUpExecutor,
+)
 from app.skill_executor.holiday import (
     HolidayNoticeExecutor,
     ReceiptConfirmExecutor,
@@ -32,6 +36,7 @@ class ExecutorRegistry:
             "holiday_notice_query": HolidayQueryExecutor(),
             "requisition_status_query": RequisitionStatusQueryExecutor(),
             "expense_status_query": ExpenseStatusQueryExecutor(),
+            "lead_follow_up": LeadFollowUpExecutor(),
         }
 
     def get_executor(self,executor_name: str) -> BaseSkillExecutor | None:
