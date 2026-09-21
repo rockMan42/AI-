@@ -195,6 +195,17 @@ class Settings(BaseSettings):
     # 默认关闭，仅用于本地开发验收。
     expense_mock_enabled: bool = True
 
+    # 权限缓存
+    permission_cache_ttl: int = Field(default=1800, ge=60)
+    permission_org_max_age: int = Field(default=1800, ge=300)
+    permission_alert_open_ids: list[str] = Field(default_factory=list)
+
+    # JWT 认证
+    auth_access_seconds: int = Field(default=3600, ge=60, le=7200)
+    auth_refresh_seconds: int = Field(default=604800, ge=3600)
+    auth_callback_url: str = ""
+    auth_cookie_secure: bool = True
+
     # 指定了 env_file = ".env"，就不再需要手动 load_dotenv() 了, 启动时自动读取.env配置
     model_config = {
         "env_file": Path(__file__).resolve().parents[2] / ".env",

@@ -213,14 +213,21 @@ async def _send_feishu_card_reply(
 
     client = get_feishu_client()
     await wait_feishu_send_slot()
-    resp = await client.post(
-        f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/reply",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "msg_type": "interactive",
-            "content": json.dumps(card, ensure_ascii=False),
-        },
-    )
+    for attempt in range(2):
+        try:
+            resp = await client.post(
+                f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/reply",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "msg_type": "interactive",
+                    "content": json.dumps(card, ensure_ascii=False),
+                },
+            )
+            break
+        except httpx.ConnectTimeout:
+            if attempt == 1:
+                raise
+            await asyncio.sleep(0.2)
 
     resp.raise_for_status()
     payload = resp.json()

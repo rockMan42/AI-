@@ -9,6 +9,9 @@ from datetime import date
 from app.services.conversation_engine.feishu import (
     _send_feishu_card_reply,
 )
+from app.services.permission_events import CONTACT_EVENTS, invalidate_organization
+from app.services.permission_audit import audit_request_id
+from app.schemas.permission import AccessDenied, PermissionUnavailable
 from app.services.expense.chat import (
     extract_image_keys,
     handle_invoice_text,
@@ -24,7 +27,7 @@ from app.skill_executor.holiday import ReceiptConfirmExecutor
 from app.security.feishu_event import decode_feishu_event
 from app.services.attendance.leave_chat import handle_leave_command
 from app.services.attendance.leave_service import LeaveError
-from fastapi import Request, APIRouter, Depends
+from fastapi import Request, APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config.settings import get_settings
 from app.constant.intent_state import IntentState
@@ -112,6 +115,20 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
 
     if data.get("type") == "url_verification":
         return {"challenge": data["challenge"]}
+
+    header = data.get("header") or {}
+    event_type = header.get("event_type")
+    event_id = header.get("event_id")
+
+    if event_type in CONTACT_EVENTS:
+        if not isinstance(event_id, str) or not 1 <= len(event_id) <= 128:
+            raise HTTPException(400, "通讯录事件缺少有效 ID")
+
+        await invalidate_organization(event_id)
+        return response.success_response("组织权限已失效")
+
+    if isinstance(event_id, str) and event_id:
+        audit_request_id.set(f"feishu:{event_id}")
 
     if (data.get("header") or {}).get("event_type") != "im.message.receive_v1":
         return response.success_response("事件类型已忽略")
@@ -803,6 +820,12 @@ async def handle_skill_action(
             session.session_id,
             IntentState.SKILL_COMPLETED,
         )
+    except (AccessDenied, PermissionUnavailable) as exc:
+        await conversation_manager.update_workflow_state(
+            session.session_id,
+            IntentState.SKILL_FAILED,
+        )
+        return str(exc)
     except Exception:
         log.exception("Executor %s failed", skill.name)
         await conversation_manager.update_workflow_state(

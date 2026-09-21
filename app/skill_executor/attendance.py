@@ -29,7 +29,7 @@ class AttendanceSKillExecutor(BaseSkillExecutor):
         
         arguments = {
             "user_id": str(target_id),
-            "query_type": slots.get("query_type") or "all",
+            "query_type": slots.get("query_type") or "attendance",
             "month": slots.get("query_month"),
             "query_date": slots.get("query_date"),
             "year": slots.get("query_year"),

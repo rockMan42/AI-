@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-
+from app.security.requisition import issue_requisition_token
 from tools.registry import registry
 
 
@@ -16,7 +16,20 @@ class RequisitionMCPError(RuntimeError):
 async def call_requisition_tool(
     tool_name: str,
     arguments: dict,
+    *,
+    user_id: int,
+    system: bool = False,
 ) -> dict:
+    arguments = {
+        **arguments,
+        "identity_token": issue_requisition_token(
+            user_id,
+            tool_name,
+            arguments.get("requisition_id"),
+            system=system,
+        ),
+    }
+
     registry_name = f"mcp__{SERVER_NAME}__{tool_name}"
 
     if registry.get_entry(registry_name) is None:

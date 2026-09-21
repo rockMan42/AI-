@@ -14,6 +14,17 @@ from app.services.knowledge.document_cleanup import (
     start_cleanup_worker,
     stop_cleanup_worker,
 )
+from uuid import uuid4
+
+from fastapi.responses import JSONResponse
+
+from app.api.v1 import auth, permission_admin
+from app.schemas.permission import AccessDenied, PermissionUnavailable
+from app.services.permission_audit import audit_ip, audit_request_id
+from app.services.permission_worker import (
+    start_permission_worker,
+    stop_permission_worker,
+)
 from app.api.v1 import lead
 from app.api.v1 import base_call_back
 from app.api.v1 import expense
@@ -58,6 +69,9 @@ async def lifespan(app: FastAPI):
 
         await init_redis(settings)
         stack.push_async_callback(close_redis)
+
+        await start_permission_worker()
+        stack.push_async_callback(stop_permission_worker)
 
         await init_milvus(settings)
         stack.push_async_callback(close_milvus)
@@ -134,6 +148,9 @@ app.include_router(invoice.router, prefix=settings.app_prefix, tags=["invoice"],
 app.include_router(expense.router,prefix=settings.app_prefix,tags=["expense"],)
 app.include_router(base_call_back.router, prefix=settings.app_prefix, tags=["feishu_callback"],)
 app.include_router(lead.router, prefix=settings.app_prefix, tags=["lead"],)
+app.include_router(auth.router, prefix=settings.app_prefix, tags=["auth"])
+app.include_router(permission_admin.router, prefix=settings.app_prefix, tags=["permission"],)
+
 # 应用启动时注册skill
 register = get_skill_register()
 register.load_from_directory("./app/hermes/skills")
@@ -164,3 +181,33 @@ async def attendance_timing(request, call_next):
             metrics["status_code"] = result.status_code
             return result
     return await invoke()
+
+
+@app.exception_handler(AccessDenied)
+async def access_denied_handler(request, exc):
+    return JSONResponse(
+        {"detail": str(exc)},
+        status_code=403,
+    )
+
+
+@app.exception_handler(PermissionUnavailable)
+async def permission_unavailable_handler(request, exc):
+    return JSONResponse(
+        {"detail": str(exc)},
+        status_code=503,
+    )
+
+
+@app.middleware("http")
+async def permission_audit_context(request, call_next):
+    request_token = audit_request_id.set(uuid4().hex)
+    ip_token = audit_ip.set(
+        request.client.host if request.client else None
+    )
+
+    try:
+        return await call_next(request)
+    finally:
+        audit_request_id.reset(request_token)
+        audit_ip.reset(ip_token)

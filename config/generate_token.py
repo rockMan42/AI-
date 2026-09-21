@@ -8,9 +8,9 @@ now = datetime.now(UTC)
 token = jwt.encode(
     {
         # 必须是数据库 t_user.feishu_open_id 中存在的用户
-        "sub": "ou_1591428b852eda1206e1efa32a3dcc8c",
+        # "sub": "ou_1591428b852eda1206e1efa32a3dcc8c",
         # "sub": "ut_expense_other_20260917", # admin
-        # "sub": "expense_test_20260918_01_manager", # manger
+        "sub": "expense_test_20260918_01_manager", # manger
         # "sub": "expense_test_20260918_01_finance", # finance
         # "sub": "expense_test_20260918_01_cashier", # cashier
         # "sub": "expense_test_20260918_01_applicant", # applicant

@@ -83,8 +83,8 @@ def register_attendance_tool(loop: asyncio.AbstractEventLoop) -> None:
         schema={
             "name": TOOL_NAME,
             "description": (
-               "查询员工考勤打卡、月度迟到早退统计和指定年度假期余额，年度未指定时默认今年。"
-                "员工仅可查询自己，HR 可查询同部门成员。"
+                "查询员工考勤、迟到早退统计和假期余额。"
+                "员工可查询本人，主管可查询所辖成员，HR可查询全公司。"
             ),
             "parameters": parameters,
         },

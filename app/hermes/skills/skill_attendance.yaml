@@ -20,11 +20,12 @@ slots:
   - name: query_type
     type: string
     required: false
-    default: all
+    default: attendance
     description: >
       打卡明细为 punch_record；迟到早退次数为 late_count；
-      假期剩余额度为 leave_balance；综合查询为 all。
-    enum: ["punch_record", "late_count", "leave_balance", "all"]
+      普通考勤查询为 attendance，只包含打卡和迟到早退统计；
+      假期剩余额度为 leave_balance；明确同时查询考勤和假期时才使用 all。
+    enum: ["attendance", "punch_record", "late_count", "leave_balance", "all"]
 
   - name: query_month
     type: string

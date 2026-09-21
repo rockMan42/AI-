@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import datetime
+from platform import system
 from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import select
@@ -446,8 +447,11 @@ async def execute_approval_poll(
             try:
                 status_data = await call_requisition_tool(
                     "query_requisition",
-                    {"requisition_id": requisition_id},
+                    {"requisition_id": requisition_id,
+                                "user_id": requisition.user_id,
+                                "system": True},
                 )
+
             except Exception:
                 await _reschedule(
                     task,

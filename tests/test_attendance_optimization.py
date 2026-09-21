@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from redis import RedisError
 
 from app.schemas.attendance import AttendanceQuery, month_bounds
+from app.schemas.permission import AccessDenied, Principal, Role
 from app.schemas.skill_result import SkillResult
 from app.services.conversation_engine.attendance_fast_path import parse_attendance_query, can_use_fast_path
 from app.services.conversation_engine.model_runner import ModelRunner
@@ -22,8 +23,10 @@ from app.services.attendance.attendance_service import AttendanceService
 
 
 @pytest.mark.parametrize("text,kind,field,value", [
-    ("查本月考勤", "all", "query_month", "2026-01"),
-    ("请帮我查上月考勤，谢谢！", "all", "query_month", "2025-12"),
+    ("查本月考勤", "attendance", "query_month", "2026-01"),
+    ("请帮我查上月考勤，谢谢！", "attendance", "query_month", "2025-12"),
+    ("查26年8月考勤", "attendance", "query_month", "2026-08"),
+    ("查2026年8月的考勤", "attendance", "query_month", "2026-08"),
     ("查昨天打卡", "punch_record", "query_date", "2025-12-31"),
     ("查今天打卡", "punch_record", "query_date", "2026-01-01"),
     ("查上月早退次数", "late_count", "query_month", "2025-12"),
@@ -55,7 +58,7 @@ def test_context_gate():
     session.workflow_state = "completed"
     assert can_use_fast_path(session)
     session.suspended_contexts = [{"intent_code": "leave_apply"}]
-    assert not can_use_fast_path(session)
+    assert can_use_fast_path(session)
 
 
 @pytest.mark.asyncio
@@ -75,23 +78,63 @@ async def test_timeout_keeps_slot_until_thread_finishes():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role,department,target_id,allowed", [
-    ("员工", 1, 3, True), ("员工", 1, 4, False),
-    ("HR", 1, 4, True), ("HR", 2, 4, False), ("管理员", 1, 4, False),
-])
-async def test_authorization(role, department, target_id, allowed):
-    actor = NS(user_id=3, name="test", role=role, department_id=department, status="活动")
+async def test_authorization_uses_resolved_principal(monkeypatch):
+    from app.security import attendance
+
+    principal = Principal(
+        user_id=3,
+        open_id="trusted",
+        role=Role.EMPLOYEE,
+        department_id=1,
+        version=1,
+    )
     target = NS(user_id=4, name="target", department_id=1, status="活动")
-    db = NS(scalar=AsyncMock(side_effect=[actor, target]))
-    if allowed:
-        assert (await authorize_attendance(db, "trusted", target_id)).user_id == target_id
-    else:
-        with pytest.raises(PermissionError):
-            await authorize_attendance(db, "trusted", target_id)
+    db = NS(scalar=AsyncMock(return_value=target))
+    resolve = AsyncMock(return_value=principal)
+    authorize = AsyncMock()
+    monkeypatch.setattr(attendance, "resolve_principal", resolve)
+    monkeypatch.setattr(attendance, "authorize", authorize)
+
+    result = await authorize_attendance(db, "trusted", 4)
+
+    assert result == AttendanceTarget(4, "target")
+    resolve.assert_awaited_once_with("trusted")
+    authorize.assert_awaited_once_with(
+        principal,
+        "attendance.read",
+        target_user_id=4,
+    )
+
+
+@pytest.mark.asyncio
+async def test_authorization_rejects_inactive_target(monkeypatch):
+    from app.security import attendance
+
+    principal = Principal(
+        user_id=3,
+        open_id="trusted",
+        role=Role.HR_ADMIN,
+        department_id=1,
+        version=1,
+    )
+    monkeypatch.setattr(
+        attendance,
+        "resolve_principal",
+        AsyncMock(return_value=principal),
+    )
+    monkeypatch.setattr(attendance, "authorize", AsyncMock())
+
+    with pytest.raises(AccessDenied, match="目标用户不存在或已停用"):
+        await authorize_attendance(
+            NS(scalar=AsyncMock(return_value=None)),
+            "trusted",
+            4,
+        )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind,expected", [
+    ("attendance", {"punch_records", "late_stats"}),
     ("punch_record", {"punch_records"}), ("late_count", {"late_stats"}),
     ("leave_balance", {"leave_balances"}), ("all", {"punch_records", "late_stats", "leave_balances"}),
 ])
@@ -261,13 +304,24 @@ async def test_webhook_fast_path_skips_model(monkeypatch):
     import json
     monkeypatch.setattr(webhook.settings, "attendance_fast_path_enabled", True)
     monkeypatch.setattr(webhook.settings, "feishu_allowed_users", "test")
-    monkeypatch.setattr(webhook, "_verify_signature", AsyncMock(return_value=True))
+    event = {"header": {"token": "test", "event_type": "im.message.receive_v1"}, "event": {
+        "sender": {"sender_id": {"open_id": "test"}},
+        "message": {"message_id": "test", "message_type": "text", "chat_type": "p2p",
+                    "content": json.dumps({"text": "查25年假期余额"})}}}
+    monkeypatch.setattr(webhook, "decode_feishu_event", AsyncMock(return_value=event))
     monkeypatch.setattr(webhook, "set_cache_if_absent", AsyncMock(return_value=True))
-    user = NS(user_id=3, status="活动")
+    user = NS(
+        user_id=3,
+        feishu_open_id="test",
+        role="员工",
+        department_id=1,
+        status="活动",
+    )
     @asynccontextmanager
     async def factory(): yield NS(expunge=Mock())
     monkeypatch.setattr(webhook, "create_session", factory)
     monkeypatch.setattr(webhook, "get_or_create_user", AsyncMock(return_value=user))
+    monkeypatch.setattr(webhook, "handle_leave_command", AsyncMock(return_value=None))
     monkeypatch.setattr(webhook, "conversation_manager", NS(update_intent_state=AsyncMock(return_value=SessionSlots("3", 3))))
     monkeypatch.setattr(webhook, "try_retry_failed_skill", AsyncMock(return_value=None))
     monkeypatch.setattr(webhook, "try_handle_pending_slot", AsyncMock(return_value=None))
@@ -279,10 +333,7 @@ async def test_webhook_fast_path_skips_model(monkeypatch):
     monkeypatch.setattr(webhook, "get_agent", Mock(side_effect=AssertionError("must skip agent")))
     register = SkillRegistry()
     register.load_from_directory("app/hermes/skills")
-    request = NS(json=AsyncMock(return_value={"header": {"token": "test"}, "event": {
-        "sender": {"sender_id": {"open_id": "test"}},
-        "message": {"message_id": "test", "message_type": "text", "chat_type": "p2p",
-                    "content": json.dumps({"text": "查25年假期余额"})}}}))
+    request = NS()
     await webhook.feishu_webhook(request, db=None, register=register)
     assert handle.call_args.kwargs["router_result"]["slots"]["query_year"] == 2025
     send.assert_awaited_once()
@@ -303,7 +354,7 @@ async def test_model_sdk_timeout_and_cleanup(monkeypatch):
     monkeypatch.setattr(webhook, "get_agent", Mock(return_value=agent))
     monkeypatch.setattr(webhook, "model_runner", ModelRunner())
     assert await webhook.conversation(None, "test", "test", "test") == {"final_response": "ok"}
-    assert create.call_args.kwargs["timeout"].read <= 10
+    assert create.call_args.kwargs["timeout"].read <= webhook.settings.intent_timeout_seconds
     create.assert_called_once()
     assert client.chat.completions.create is create
     client.close.assert_called_once()
@@ -354,7 +405,7 @@ async def test_non_card_skill_reply_regression(monkeypatch, skill_name):
     user = NS(user_id=3, feishu_open_id="test", role="员工", department_id=1)
     result = await webhook.handle_skill_action(user, "test", "test", {"skill": NS(name=skill_name), "slots": {}, "confidence": 1}, None, None)
     assert result == "业务结果"
-    assert conversation.await_count == (1 if skill_name == "leave_apply" else 0)
+    conversation.assert_not_awaited()
     assert manager.update_workflow_state.call_args.args[1].value == "completed"
 
 

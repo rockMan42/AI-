@@ -14,13 +14,41 @@ def parse_attendance_query(text: str, today: date) -> dict | None:
         return None
     body = match["body"]
     slots = {"query_target": "self"}
-    month = re.fullmatch(r"(本月|上月)(考勤|迟到次数|早退次数)", body)
+    month = re.fullmatch(
+        r"(?:(?P<relative>本月|上月)|"
+        r"(?:(?P<year>[0-9]{2}|[0-9]{4})年)?"
+        r"(?P<month>0?[1-9]|1[0-2])月份?)"
+        r"(?:的)?(?P<kind>考勤|迟到次数|早退次数)",
+        body,
+    )
     day = re.fullmatch(r"(今天|昨天)(?:的)?打卡(?:记录)?", body)
     year = re.fullmatch(r"(今年|去年|[0-9]{4}年|[0-9]{2}年)?(?:的)?假期余额", body)
     if month:
-        target = today if month[1] == "本月" else today.replace(day=1) - timedelta(days=1)
-        slots.update(query_month=target.strftime("%Y-%m"),
-                     query_type="all" if month[2] == "考勤" else "late_count")
+        if month["relative"]:
+            target = (
+                today
+                if month["relative"] == "本月"
+                else today.replace(day=1) - timedelta(days=1)
+            )
+            query_month = target.strftime("%Y-%m")
+        else:
+            year_number = (
+                int(month["year"])
+                if month["year"]
+                else today.year
+            )
+            if year_number < 100:
+                year_number += 2000
+            query_month = f"{year_number:04d}-{int(month['month']):02d}"
+
+        slots.update(
+            query_month=query_month,
+            query_type=(
+                "attendance"
+                if month["kind"] == "考勤"
+                else "late_count"
+            ),
+        )
     elif day:
         target = today - timedelta(days=int(day[1] == "昨天"))
         slots.update(query_date=target.isoformat(), query_type="punch_record")
@@ -41,6 +69,6 @@ def parse_attendance_query(text: str, today: date) -> dict | None:
 
 
 def can_use_fast_path(session) -> bool:
-    if session.pending_slot or session.pending_intent or session.suspended_contexts:
+    if session.pending_slot or session.pending_intent:
         return False
     return not session.intent_code or session.workflow_state == "completed"

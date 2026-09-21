@@ -30,61 +30,42 @@ PERMISSION_SCOPES = {
 
 
 async def get_current_user(
-        credentials: Annotated[
-            HTTPAuthorizationCredentials | None,
-            Depends(bearer_scheme)
-        ],
-        db: Annotated[AsyncSession,Depends(get_session)],
-        settings: Annotated[
-            Settings,
-            Depends(get_settings)
-        ]
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None,
+        Depends(bearer_scheme),
+    ],
+    db: Annotated[AsyncSession, Depends(get_session)],
 ) -> User:
+    import time
 
-    # 身份校验
+    from app.models.permission import AuthSession
+    from app.services.auth import decode_access
+
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="缺少身份校验",
+            401,
+            "缺少身份凭证",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # jwt配置校验
-    secret = settings.auth_jwt_secret.get_secret_value()
-    if len(secret) < 32:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="身份认证服务未正确配置"
-        )
+    claims = decode_access(credentials.credentials)
+    session = await db.get(AuthSession, claims["sid"])
 
-    try:
-        payload = jwt.decode(
-            credentials.credentials,
-            secret,
-            algorithms=["HS256"],
-            audience=settings.auth_jwt_audience,
-            issuer=settings.auth_jwt_issuer,
-            options={"require": ["sub", "iat", "exp"]},
-        )
-        open_id = payload["sub"]
-        if not isinstance(open_id, str) or not open_id:
-            raise jwt.InvalidTokenError("invalid sub")
-    except jwt.PyJWTError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="身份凭证无效或已过期",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
+    if (
+        session is None
+        or session.revoked
+        or session.expires_at <= time.time()
+        or session.user_id != claims["user_id"]
+    ):
+        raise HTTPException(401, "登录会话已失效")
 
-    smtp = select(User).where(User.feishu_open_id == open_id)
-    result = await db.execute(smtp)
-    user = result.scalar_one_or_none()
-
-    if user is None or user.status not in ACTIVE_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="用户不存在或者已停用"
-        )
+    user = await db.get(User, claims["user_id"])
+    if (
+        user is None
+        or user.feishu_open_id != claims["sub"]
+        or user.status not in ACTIVE_STATUSES
+    ):
+        raise HTTPException(403, "用户不存在或已停用")
 
     return user
 

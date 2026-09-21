@@ -47,12 +47,16 @@ class AttendanceService:
         tasks = {}
 
         async with asyncio.TaskGroup() as group:
-            if request.query_type in {"punch_record", "all"}:
+            if request.query_type in {
+                "attendance", "punch_record", "all",
+            }:
                 tasks["punch_records"] = group.create_task(
                     self._punch_records(request, target.user_id)
                 )
 
-            if request.query_type in {"late_count", "all"}:
+            if request.query_type in {
+                "attendance", "late_count", "all",
+            }:
                 tasks["late_stats"] = group.create_task(
                     self._late_stats(
                         request,

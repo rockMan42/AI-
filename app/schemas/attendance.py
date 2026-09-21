@@ -7,7 +7,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
-QueryType = Literal["punch_record", "late_count", "leave_balance", "all"]
+QueryType = Literal[
+    "attendance",
+    "punch_record",
+    "late_count",
+    "leave_balance",
+    "all",
+]
 
 STATUS_VALUES = {
     "normal": ("normal", "正常"),
@@ -36,7 +42,7 @@ class AttendanceQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     user_id: str
-    query_type: QueryType = "all"
+    query_type: QueryType = "attendance"
     month: str | None = Field(
         default=None,
         pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$",

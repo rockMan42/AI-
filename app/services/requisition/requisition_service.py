@@ -286,6 +286,7 @@ class RequisitionService:
             result = await call_requisition_tool(
                 "submit_requisition",
                 {
+                    "user_id": user.user_id,
                     "applicant_id": user_id,
                     "item_category":
                         draft["item_category"],

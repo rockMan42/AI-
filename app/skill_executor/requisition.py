@@ -76,7 +76,8 @@ class RequisitionStatusQueryExecutor(BaseSkillExecutor):
         try:
             data = await call_requisition_tool(
                 "query_requisition",
-                {"requisition_id": row.id},
+                {"requisition_id": row.id,
+                            "user_id": int(context.user_id)},
             )
         except Exception:
             return SkillResult(

@@ -13,7 +13,7 @@ from app.core.redis_client import init_redis, close_redis
 from app.models import User, Requisition, RequisitionApproval
 from app.services.requisition.category_rule_service import CategoryRuleService
 from app.services.requisition.requisition_service import OaRequisitionGateway, RequisitionError, STATUS_TEXT
-
+from app.security.requisition import authorize_requisition
 
 @asynccontextmanager
 async def lifespan(server: FastMCP):
@@ -78,6 +78,11 @@ async def submit_requisition(
 ) -> dict:
     """本地模式直接创建申领单；HTTP 模式调用真实 OA。"""
 
+    await authorize_requisition(
+        ctx.identity_token,
+        "submit_requisition",
+        applicant_id=applicant_id,
+    )
     if applicant_id <= 0:
         raise ToolError("申请人无效")
     if not item_category.strip():
@@ -175,6 +180,11 @@ async def query_requisition(
 ) -> dict:
     """本地模式查询数据库；HTTP 模式查询真实 OA。"""
 
+    await authorize_requisition(
+        ctx.identity_token,
+        "query_requisition",
+        resource_id=requisition_id,
+    )
     if requisition_id <= 0:
         raise ToolError("申领单号无效")
 
