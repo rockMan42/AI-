@@ -21,7 +21,7 @@ from app.services.attendance.leave_calendar import (
     CalendarUnavailable,
     load_calendar,
 )
-from app.services.conversation_engine.feishu import (
+from app.services.notification.legacy import (
     send_feishu_card,
 )
 from app.services.holiday_cron import (
@@ -127,6 +127,7 @@ async def _sync_local_status(
     requisition: Requisition,
     status_data: dict,
 ) -> None:
+    previous_approver = requisition.approver_id
     requisition.status = status_data["status"]
 
     current = status_data.get("current_approver")
@@ -142,6 +143,8 @@ async def _sync_local_status(
         )
     elif status_data["status"] in TERMINAL_STATUSES:
         requisition.approver_id = None
+    if requisition.approver_id != previous_approver:
+        requisition.node_started_at = utc_now() if requisition.approver_id else None
 
     existing = (
         await db.execute(
@@ -310,6 +313,9 @@ async def _check_overtime_warning(
     applicant: User,
     status_data: dict,
 ) -> None:
+    from app.config.settings import get_settings
+    if get_settings().notification_enabled:
+        return
     if requisition.status not in {"pending", "approving"}:
         return
 

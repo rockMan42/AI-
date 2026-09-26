@@ -10,6 +10,9 @@ STATUS_LABELS = {
 }
 
 
+STATUS_LABELS.update({"needs_review": "待核实", "rest": "休息日", "pending": "班次未结束"})
+
+
 def text_block(content: str) -> dict:
     return {
         "tag": "div",
@@ -69,6 +72,8 @@ def build_attendance_card(result: dict) -> dict:
 
         for row in records["items"]:
             status = STATUS_LABELS.get(row["status"], row["status"])
+            if "late" in row.get("issues", []) and "early_leave" in row.get("issues", []):
+                status = "迟到且早退"
             lines.append(
                 f"{row['date']}  "
                 f"上班 {row['punch_in'] or '未打卡'} | "
@@ -104,6 +109,9 @@ def build_attendance_card(result: dict) -> dict:
         footer += f"\n统计生成时间：{stats['calculated_at'][:10]}"
         if stats["cached"]:
             footer += "（缓存，最长 60 秒）"
+
+    if result.get("rule_version") is not None:
+        footer += f"\n按当前考勤规则 v{result['rule_version']} 重算，历史月份结果可能变化"
 
     elements.extend([{"tag": "hr"}, text_block(footer)])
 

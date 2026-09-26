@@ -67,7 +67,7 @@ async def knowledge_search(
                 result = await service.search(request, user)
                 return result.model_dump(mode="json")
     except TimeoutError:
-        raise ToolError("知识检索超时") from None
+        raise ToolError("知识问答处理超时，请稍后重试") from None
 
     except ValidationError:
         raise ToolError("检索参数无效") from None

@@ -78,6 +78,15 @@ async def advance_mock(admin_id, expense_id, body: MockApprovalInput):
                     "version": state["version"],
                 }
 
+        from app.services.business_rules.expense_adapter import validate_fixed_route
+        await validate_fixed_route(db, expense, current_status=row.status)
+        await validate_fixed_route(db, expense, body.to_status, body.next_approver_id)
+        route = (expense.payload or {}).get("approval_route")
+        if route:
+            stage_index = {"submitted": 0, "manager_approved": 1, "finance_approved": 2}.get(row.status)
+            if stage_index is None or state["current_approver_id"] != route["nodes"][stage_index]["user_id"]:
+                raise ExpenseError("当前审批人与固定路线不一致", 409)
+
         try:
             ensure_transition(row.status, body.to_status)
         except ValueError as exc:

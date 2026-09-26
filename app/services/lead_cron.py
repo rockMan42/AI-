@@ -7,7 +7,7 @@ from sqlalchemy import func, select, update
 from app.core.database import create_session
 from app.models import Lead, LeadFollowUp, User
 from app.security.auth import ACTIVE_STATUSES
-from app.services.conversation_engine.feishu import send_feishu_card
+from app.services.notification.legacy import send_feishu_card
 from app.services.holiday_cron import cache, lease
 from app.services.lead import (
     CLOSED_STATUSES,

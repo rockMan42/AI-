@@ -1,4 +1,7 @@
 
+from app.models.business_rule import (
+    BusinessRule, RuleVersionHistory, RuleDocBinding, RuleChangeRequest, RuleOutbox,
+)
 from app.models.knowledge_document import KnowledgeDocument
 from app.models.requisition import (
     CategoryFieldRule,
@@ -43,6 +46,14 @@ from app.models.expense_approval import (
     ExpenseApprovalLog,
     ExpenseNotification,
 )
+from app.models.performance import (
+    PerformanceReminderLog,
+    PerformanceReview,
+    PerformanceStats,
+)
+from app.models.notification import (
+    NotificationItem, NotificationLog, NotificationSchedule, NotificationTemplate,
+)
 
 """
 统一导入入口：其他代码可以写 from app.models import HolidayNotice。
@@ -55,6 +66,9 @@ __all__ = [
     "KnowledgeSearchLog",
     "Department",
     "User",
+    "PerformanceReview",
+    "PerformanceStats",
+    "PerformanceReminderLog",
     "CategoryFieldRule",
     "Requisition",
     "RequisitionApproval",

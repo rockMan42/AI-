@@ -1,0 +1,33 @@
+name: business_rule_manage
+display_name: "管理业务规则"
+description: "仅 HRAdmin 查询或管理系统中已发布的报销、审批、考勤业务规则配置。用户明确问考勤业务规则、报销规则或审批规则时选择本技能；问公司考勤制度正文、打卡政策等文档内容时选择知识库问答。修改和回滚生成待人工确认卡片，不能自动发布。"
+triggers: ["业务规则", "编辑规则", "修改规则", "回滚规则", "制度同步", "规则版本"]
+priority: 20
+slots:
+  - name: rule_type
+    type: string
+    required: true
+    enum: [reimbursement, approval, attendance]
+    description: "规则类型：报销、审批、考勤"
+    follow_up_prompt: "要管理报销、审批还是考勤规则？"
+  - name: operation
+    type: string
+    required: true
+    enum: [view, edit, rollback, versions, compare, acknowledge]
+    description: "查看、编辑、回滚、历史、版本比较或确认制度变更"
+  - name: rule_data
+    type: string
+    required: false
+    description: "仅供系统内部传递完整规则数据；不要要求用户填写或阅读 JSON、代码或字段路径。未提供时使用中文编辑卡片，不猜测制度参数"
+  - name: version
+    type: string
+    required: false
+    description: "回滚目标版本或比较结束版本"
+  - name: from_version
+    type: string
+    required: false
+    description: "比较起始版本，不填则比较当前版本与上一版"
+  - name: change_summary
+    type: string
+    required: false
+    description: "修改原因或制度变化无需修改规则的原因"

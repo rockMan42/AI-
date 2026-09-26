@@ -1,4 +1,5 @@
 from app.skill_executor.attendance import AttendanceSKillExecutor
+from app.skill_executor.business_rules import BusinessRulesExecutor
 from app.skill_executor.base import BaseSkillExecutor
 from app.skill_executor.leave import LeaveSkillExecutor
 from app.skill_executor.policy import PolicySkillExecutor
@@ -24,6 +25,7 @@ class ExecutorRegistry:
 
     def __init__(self):
         self._executors = {
+            "business_rule_manage": BusinessRulesExecutor(),
             "attendance_query": AttendanceSKillExecutor(),
             "leave_apply": LeaveSkillExecutor(),
             "policy_query": PolicySkillExecutor(),
@@ -41,4 +43,3 @@ class ExecutorRegistry:
 
     def get_executor(self,executor_name: str) -> BaseSkillExecutor | None:
         return self._executors.get(executor_name)
-

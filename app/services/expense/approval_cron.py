@@ -94,7 +94,9 @@ async def execute_expense_task(task_id, *, force=False):
             elif task["task_type"] == "EXPENSE_TIMEOUT_SCAN":
                 # 告警前先更新审批人和终态，避免凭昨天的数据催办。
                 await poll_all()
-                await scan_timeouts()
+                from app.config.settings import get_settings
+                if not get_settings().notification_enabled:
+                    await scan_timeouts()
                 next_at = next_nine_ms()
             else:
                 await deliver_pending()

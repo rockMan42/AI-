@@ -48,7 +48,7 @@ class RAGService:
         except PermissionError:
             raise
         except TimeoutError:
-            raise RAGError("知识检索超时，请稍后重试") from None
+            raise RAGError("知识问答处理超时，请稍后重试") from None
         except RAGError:
             raise
         except Exception as exc:

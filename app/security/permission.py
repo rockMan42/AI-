@@ -11,9 +11,15 @@ READ_ACTIONS = {
 }
 
 ADMIN_ACTIONS = {
+    "rules.read",
+    "rules.write",
+    "rules.rollback",
     "role.read",
     "role.write",
     "audit.read",
+    "performance.report",
+    "performance.remind",
+    "notification.manage",
 }
 
 

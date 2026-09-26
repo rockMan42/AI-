@@ -18,12 +18,19 @@ from uuid import uuid4
 
 from fastapi.responses import JSONResponse
 
-from app.api.v1 import auth, permission_admin
+from app.api.v1 import auth, permission_admin, performance, notifications
+from app.services.notification.worker import start_notification_worker, stop_notification_worker
+from app.api.v1 import rules
+from app.services.business_rules.worker import start_rule_workers, stop_rule_workers
 from app.schemas.permission import AccessDenied, PermissionUnavailable
 from app.services.permission_audit import audit_ip, audit_request_id
 from app.services.permission_worker import (
     start_permission_worker,
     stop_permission_worker,
+)
+from app.services.performance_reminder import (
+    start_performance_reminder_worker,
+    stop_performance_reminder_worker,
 )
 from app.api.v1 import lead
 from app.api.v1 import base_call_back
@@ -70,8 +77,17 @@ async def lifespan(app: FastAPI):
         await init_redis(settings)
         stack.push_async_callback(close_redis)
 
+        stack.push_async_callback(stop_rule_workers)
+        await start_rule_workers()
+
         await start_permission_worker()
         stack.push_async_callback(stop_permission_worker)
+
+        await start_performance_reminder_worker()
+        stack.push_async_callback(stop_performance_reminder_worker)
+
+        await start_notification_worker()
+        stack.push_async_callback(stop_notification_worker)
 
         await init_milvus(settings)
         stack.push_async_callback(close_milvus)
@@ -150,6 +166,9 @@ app.include_router(base_call_back.router, prefix=settings.app_prefix, tags=["fei
 app.include_router(lead.router, prefix=settings.app_prefix, tags=["lead"],)
 app.include_router(auth.router, prefix=settings.app_prefix, tags=["auth"])
 app.include_router(permission_admin.router, prefix=settings.app_prefix, tags=["permission"],)
+app.include_router(performance.router, prefix=settings.app_prefix, tags=["performance"])
+app.include_router(notifications.router, prefix=settings.app_prefix, tags=["notifications"])
+app.include_router(rules.router, prefix=settings.app_prefix, tags=["rules"])
 
 # 应用启动时注册skill
 register = get_skill_register()

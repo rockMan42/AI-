@@ -146,7 +146,7 @@ async def load_rules(db, revision: int) -> list[dict]:
     return rules
 
 
-def evaluate(rule: dict, facts: dict) -> bool:
+def evaluate_leaf(rule: dict, facts: dict) -> bool:
     condition = rule["condition_json"]
     field = condition["field"]
     operator = condition["operator"]
@@ -204,6 +204,11 @@ def evaluate(rule: dict, facts: dict) -> bool:
         return False
 
     return False
+
+
+def evaluate(rule: dict, facts: dict) -> bool:
+    from app.services.business_rules.evaluators import evaluate_condition
+    return evaluate_condition(rule["condition_json"], facts, rule)
 
 
 def choose_rules(
@@ -281,10 +286,8 @@ def failure(
 
 def check_facts(rules: list[dict], facts: dict, today: date) -> list[dict]:
     selected = choose_rules(rules, facts, today)
-    fields = {
-        rule["condition_json"]["field"]
-        for rule in selected
-    }
+    from app.services.business_rules.validation import leaves
+    fields = {condition["field"] for rule in selected for condition in leaves(rule["condition_json"])}
 
     mandatory = {"buyer_name", "buyer_tax_id"}
     if facts["has_trip"]:
@@ -322,7 +325,7 @@ def check_facts(rules: list[dict], facts: dict, today: date) -> list[dict]:
             continue
 
         condition = rule["condition_json"]
-        expected = condition["value"]
+        expected = condition.get("value", "复合条件")
         if isinstance(expected, str) and expected.startswith("$"):
             expected = (
                 rule["max_amount"]
@@ -337,7 +340,7 @@ def check_facts(rules: list[dict], facts: dict, today: date) -> list[dict]:
                 rule["suggestion"],
                 allow_override=rule["allow_override"],
                 severity=rule["severity"],
-                actual=facts.get(condition["field"]),
+                actual=facts.get(condition.get("field", "")),
                 expected=expected,
             )
         )

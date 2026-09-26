@@ -9,6 +9,8 @@ from app.models import User
 from app.security.auth import ACTIVE_STATUSES
 from app.security.feishu_event import decode_feishu_event
 from app.services import holiday as service
+from app.services.attendance.feishu_card import text_block
+from app.services.attendance.leave_cards import card as result_card
 from app.services.holiday_cron import HolidayError
 
 router = APIRouter()
@@ -31,6 +33,14 @@ async def card_callback(request: Request):
         raise HTTPException(422, "卡片操作参数无效")
 
     # 一个回调入口分发不同业务卡片。
+    if value.get("module") == "rules":
+        from app.services.business_rules.cards import handle_rule_card
+        return await handle_rule_card(data)
+
+    if value.get("module") == "notification":
+        from app.services.notification.actions import handle_card
+        return await handle_card(data)
+
     if value.get("module") == "leave":
         from app.api.v1.feishu_leave import handle_leave_card_data
 
@@ -72,8 +82,14 @@ async def card_callback(request: Request):
                     str(value.get("identifier", "")),
                     cancel=operation == "cancel_notice_draft",
                 )
+                created = message.startswith("通知已创建")
                 return {
-                    "toast": {"type": "success", "content": message}
+                    "toast": {"type": "success", "content": message},
+                    "card": {"type": "raw", "data": result_card(
+                        "节假日安排已创建" if created else "节假日安排已取消",
+                        [text_block(message)],
+                        "green" if created else "grey",
+                    )},
                 }
 
             if operation != "confirm_receipt":
@@ -141,5 +157,3 @@ async def card_callback(request: Request):
                 "content": "服务暂不可用，请重试",
             }
         }
-
-

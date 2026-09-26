@@ -11,6 +11,9 @@ from app.config.settings import get_settings
 from app.core.database import init_db, close_db, create_session
 from app.core.redis_client import init_redis, close_redis
 from app.models import User, Requisition, RequisitionApproval
+from app.models.department import Department
+from app.security.auth import ACTIVE_STATUSES
+from app.utils.time import utc_now
 from app.services.requisition.category_rule_service import CategoryRuleService
 from app.services.requisition.requisition_service import OaRequisitionGateway, RequisitionError, STATUS_TEXT
 from app.security.requisition import authorize_requisition
@@ -137,6 +140,21 @@ async def submit_requisition(
         if applicant is None:
             raise ToolError("申请人不存在")
 
+        approver_id = None
+        department_id = applicant.department_id
+        seen = set()
+        while department_id and department_id not in seen:
+            seen.add(department_id)
+            department = await db.get(Department, department_id)
+            if department is None:
+                break
+            if department.manager_user_id and department.manager_user_id != applicant_id:
+                candidate = await db.get(User, department.manager_user_id)
+                if candidate and candidate.status in ACTIVE_STATUSES:
+                    approver_id = candidate.user_id
+                    break
+            department_id = department.parent_id
+
         requisition = Requisition(
             user_id=applicant_id,
             item_category=item_category.strip(),
@@ -145,7 +163,8 @@ async def submit_requisition(
             quantity=quantity,
             reason=reason,
             status="pending",
-            approver_id=None,
+            approver_id=approver_id,
+            node_started_at=utc_now() if approver_id else None,
         )
         db.add(requisition)
         await db.flush()

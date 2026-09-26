@@ -134,8 +134,7 @@ class EmbeddingClient:
         retries = 0 if online else self._max_retries
         for attempt in range(0, retries + 1):
             try:
-                # 临时排查：完整密钥会写入日志，排查完成后移除此日志。
-                log.info("dashscope_request model=%s api_key=%s", self._model, self._api_key)
+                log.info("dashscope_request model=%s", self._model)
                 response = await self._client.post(
                     self._endpoint,
                     timeout=remaining_seconds(self._settings.embedding_timeout_seconds)

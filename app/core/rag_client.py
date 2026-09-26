@@ -53,9 +53,7 @@ class RAGClient:
         model = payload.get("model", "unknown")
 
         try:
-            # 临时排查：完整密钥会写入日志，排查完成后移除此日志。
-            log.info("dashscope_request model=%s api_key=%s", model,
-                     self._client.headers.get("Authorization", "").removeprefix("Bearer "))
+            log.info("dashscope_request model=%s", model)
             response = await self._client.post(
                 url=url,
                 json=payload,

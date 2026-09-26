@@ -55,7 +55,8 @@ class Settings(BaseSettings):
     rag_rerank_min_score: float = Field(default=0.15, ge=0, le=1)
     rag_rerank_high_score: float = Field(default=0.4, ge=0, le=1)
 
-    rag_query_timeout_seconds: float = Field(default=5.0, gt=0, le=5)
+    # 查询预算包含召回、重排和答案生成，可按部署配置放宽等待上限。
+    rag_query_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
     rag_query_concurrency: int = Field(default=5, ge=1, le=5)
     knowledge_retrieval_mode: Literal["dense", "hybrid"] = "dense"
     # 与检索模式分开，使新索引可先做纯向量对照。
@@ -199,6 +200,26 @@ class Settings(BaseSettings):
     permission_cache_ttl: int = Field(default=1800, ge=60)
     permission_org_max_age: int = Field(default=1800, ge=300)
     permission_alert_open_ids: list[str] = Field(default_factory=list)
+
+    # 绩效催办默认关闭，启用后才会向评分人发送飞书卡片。
+    performance_reminder_enabled: bool = True
+    notification_enabled: bool = True
+    performance_reminder_poll_seconds: float = Field(
+        default=3600,
+        ge=60,
+    )
+
+    # 统一业务规则：迁移、首版发布及核对完成后启用业务切换。
+    business_rules_enabled: bool = True
+    rules_worker_enabled: bool = True
+    rules_feishu_enabled: bool = True
+    rules_environment: str = "local"
+    rules_encryption_keys: dict[str, str] = Field(default_factory=dict)
+    rules_encryption_key_id: str = ""
+    rules_sensitive_types: list[str] = Field(default_factory=list)
+    rules_hr_open_ids: list[str] = Field(default_factory=list)
+    rules_bitable_app_token: str = ""
+    rules_bitable_table_id: str = ""
 
     # JWT 认证
     auth_access_seconds: int = Field(default=3600, ge=60, le=7200)

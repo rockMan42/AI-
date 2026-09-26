@@ -146,6 +146,11 @@ async def sync_one(expense_id: int):
             actor_id = item.get("approver_id")
             if type(actor_id) is not int:
                 raise ValueError("审批操作人编号无效")
+            route = (expense.payload or {}).get("approval_route")
+            if route:
+                stage = {"submitted": 0, "manager_approved": 1, "finance_approved": 2}.get(expense.status)
+                if stage is None or actor_id != route["nodes"][stage]["user_id"]:
+                    raise ValueError("财务审批事件与固定审批路线不一致")
             actor = await db.get(User, actor_id)
             if actor is None:
                 raise ValueError("审批操作人尚未映射到本地用户")
@@ -155,6 +160,9 @@ async def sync_one(expense_id: int):
                 raise ValueError("审批意见格式错误")
 
             next_id = item.get("current_approver_id")
+            if route:
+                from app.services.business_rules.expense_adapter import validate_fixed_route
+                await validate_fixed_route(db, expense, new_status, next_id)
             if new_status in POLL_STATUSES:
                 await validate_actor(db, next_id, expense.user_id)
             elif next_id is not None:

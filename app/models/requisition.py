@@ -108,6 +108,7 @@ class Requisition(Base):
         onupdate=func.current_timestamp(),
         comment="更新时间",
     )
+    node_started_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class RequisitionApproval(Base):

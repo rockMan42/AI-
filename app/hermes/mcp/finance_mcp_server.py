@@ -107,6 +107,9 @@ async def submit_expense(
                     raise ExpenseError("相同报销单的提交内容发生变化")
                 return receipt_data(existing)
 
+            from app.services.business_rules.expense_adapter import validate_fixed_route
+            await validate_fixed_route(db, expense)
+
             approver = await db.get(User, expense.approver_id)
             if (
                     approver is None

@@ -23,7 +23,7 @@ from app.models.user import User
 from app.schemas.holiday import NoticeInput, NoticeUpdate
 from app.security.auth import ACTIVE_STATUSES, MANAGEMENT_ROLES
 from app.services.attendance.leave_cards import card
-from app.services.conversation_engine.feishu import send_feishu_card
+from app.services.notification.legacy import send_feishu_card
 from app.services.conversation_engine.session_store import SessionStore
 from app.services.holiday_cron import (
     HolidayError,

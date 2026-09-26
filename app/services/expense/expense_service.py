@@ -15,8 +15,6 @@ from app.models.expense_flow import (
     BusinessTrip,
     ExpenseInvoiceClaim,
     ExpensePolicy,
-    ExpenseRule,
-    ExpenseRuleAudit,
 )
 from app.schemas.expense import (
     ExpenseCheckInput,
@@ -25,10 +23,10 @@ from app.schemas.expense import (
     ExpenseRuleInput,
     ExpenseSupplement,
 )
-from app.security.auth import ACTIVE_STATUSES, ADMIN_ROLES
+from app.security.auth import ACTIVE_STATUSES
 from app.services.expense.rules import (
     ExpenseError, check_facts, digest, failure,
-    invoice_key, load_rules, money, rule_data,
+    invoice_key, load_rules, money,
 )
 from app.utils.time import as_shanghai, utc_now
 
@@ -79,6 +77,10 @@ def detail_data(row: Expense) -> dict:
     }
 
 async def locked_policy(db):
+    from app.config.settings import get_settings
+    if get_settings().business_rules_enabled:
+        from app.services.business_rules.expense_adapter import locked_expense_policy
+        return await locked_expense_policy(db)
     policy = await db.scalar(
         select(ExpensePolicy)
         .where(ExpensePolicy.id == 1)
@@ -188,7 +190,8 @@ class ExpenseService:
         if len(rows) != len(body.invoice_ids):
             raise ExpenseError("部分发票不存在", 404)
 
-        rules = await load_rules(db, policy.revision)
+        rules = ([r for r in policy.rules_snapshot["rule_data"]["rules"] if r["status"] == "active"]
+                 if hasattr(policy, "rules_snapshot") else await load_rules(db, policy.revision))
         today = as_shanghai(utc_now()).date()
         previous_meals = Decimal("0.00")
 
@@ -422,7 +425,18 @@ class ExpenseService:
             if failure_item["severity"] == "block"
         ]
 
+        route = None
+        if hasattr(policy, "approval_snapshot"):
+            from app.services.business_rules.expense_adapter import resolve_route
+            route = await resolve_route(db, policy.approval_snapshot, user, str(total))
+
         return {
+            "approval_route": route,
+            "rule_type": "reimbursement",
+            "rule_version": policy.revision,
+            "schema_version": 1 if route else None,
+            "approval_level": route["nodes"][0]["stage"] if route else "direct_manager",
+            "rule_versions": ({"reimbursement": policy.revision, "approval": policy.approval_snapshot["version"]} if route else {}),
             "invoice_ids": sorted(body.invoice_ids),
             "trip_id": body.trip_id,
             "revision": policy.revision,
@@ -438,6 +452,7 @@ class ExpenseService:
             ),
             # 提交时比较校验上下文，防止确认过程中数据发生变化。
             "validation_hash": digest({
+                "approval_route": route,
                 "revision": policy.revision,
                 "facts": facts_list,
                 "results": results,
@@ -494,7 +509,8 @@ class ExpenseService:
                     Department, user.department_id,
                 )
                 approver_id = (
-                    department.manager_user_id if department else None
+                    report["approval_route"]["nodes"][0]["user_id"] if report.get("approval_route")
+                    else department.manager_user_id if department else None
                 )
                 approver = (
                     await db.get(User, approver_id)
@@ -671,83 +687,25 @@ class ExpenseService:
                 "status": row.status,
             } for row in rows]
 
-    async def list_rules(self):
-        async with create_session() as db:
-            rows = (
-                await db.scalars(
-                    select(ExpenseRule).order_by(ExpenseRule.id)
-                )
-            ).all()
-            return [rule_data(row) for row in rows]
+    async def list_rules(self, user_id):
+        from app.services.business_rules.expense_adapter import legacy_principal
+        from app.services.business_rules.service import RuleService
+        snapshot = await RuleService().get(await legacy_principal(user_id), "reimbursement")
+        return snapshot["rule_data"]["rules"]
 
     async def save_rule(self, user_id, rule_id, body: ExpenseRuleInput):
-        try:
-            async with create_session() as db, db.begin():
-                policy = await locked_policy(db)
-                user = await locked_user(db, user_id)
-                if user.role not in ADMIN_ROLES:
-                    raise ExpenseError("仅管理员可修改规则", 403)
+        from app.services.business_rules.expense_adapter import legacy_update
+        return await legacy_update(user_id, rule_id=rule_id, rule=body)
 
-                row = (
-                    await db.get(ExpenseRule, rule_id)
-                    if rule_id is not None else None
-                )
-                if rule_id is not None and row is None:
-                    raise ExpenseError("规则不存在", 404)
-
-                before = rule_data(row) if row else None
-                if row is None:
-                    row = ExpenseRule()
-                    db.add(row)
-
-                values = body.model_dump()
-                values["condition_json"] = (
-                    body.condition_json.model_dump(mode="json")
-                )
-                for name, value in values.items():
-                    setattr(row, name, value)
-
-                await db.flush()
-                after = rule_data(row)
-                db.add(ExpenseRuleAudit(
-                    operator_id=user_id,
-                    target=f"rule:{row.id}",
-                    before_json=before,
-                    after_json=after,
-                ))
-                policy.revision += 1
-                return after
-        except IntegrityError:
-            raise ExpenseError("规则名称已存在", 409) from None
-
-    async def get_policy(self):
-        async with create_session() as db:
-            row = await db.get(ExpensePolicy, 1)
-            if row is None:
-                raise ExpenseError("配置不存在", 404)
-            return {
-                "revision": row.revision,
-                **row.config_json,
-            }
-
+    async def get_policy(self, user_id):
+        from app.services.business_rules.expense_adapter import legacy_principal
+        from app.services.business_rules.service import RuleService
+        snapshot = await RuleService().get(await legacy_principal(user_id), "reimbursement")
+        return {"revision": snapshot["version"], **snapshot["rule_data"]["policy"]}
 
     async def save_policy(self, user_id, body: ExpensePolicyInput):
-        async with create_session() as db, db.begin():
-            policy = await locked_policy(db)
-            user = await locked_user(db, user_id)
-            if user.role not in ADMIN_ROLES:
-                raise ExpenseError("仅管理员可修改配置", 403)
-
-            data = body.model_dump(mode="json")
-            db.add(ExpenseRuleAudit(
-                operator_id=user_id,
-                target="policy:1",
-                before_json=policy.config_json,
-                after_json=data,
-            ))
-            policy.config_json = data
-            policy.revision += 1
-            return {"revision": policy.revision, **data}
+        from app.services.business_rules.expense_adapter import legacy_update
+        return await legacy_update(user_id, policy=body)
 
     async def reopen_rejected(self, user_id, expense_id):
         async with create_session() as db, db.begin():

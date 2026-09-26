@@ -10,7 +10,7 @@ from app.core import redis_client as redis_module
 from app.core.database import create_session
 from app.models.permission import OrganizationState, PermissionAlert
 from app.schemas.permission import Role
-from app.services.conversation_engine.feishu import send_feishu_card
+from app.services.notification.legacy import send_feishu_card
 from app.services.organization import sync_organization
 from app.services.role_mapper import resolve_principal
 

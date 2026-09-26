@@ -266,6 +266,7 @@ async def mock_requisition_status(
                 "指定审批人不存在",
             )
 
+    previous_approver = requisition.approver_id
     requisition.status = body.status
     requisition.approver_id = (
         None
@@ -273,6 +274,9 @@ async def mock_requisition_status(
         in {"approved", "rejected", "fulfilled"}
         else body.approver_id
     )
+    if requisition.approver_id != previous_approver:
+        from app.utils.time import utc_now
+        requisition.node_started_at = utc_now() if requisition.approver_id else None
 
     if body.action is not None:
         if body.approver_id is None:
@@ -300,7 +304,6 @@ async def mock_requisition_status(
             "approver_id": requisition.approver_id,
         },
     }
-
 
 
 

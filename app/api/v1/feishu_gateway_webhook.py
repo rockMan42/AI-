@@ -37,6 +37,7 @@ from app.services.conversation_engine.conversation_manager import ConversationMa
 from app.hermes.agent import get_agent
 from app.hermes.intent_client import classify_intent
 from app.services.conversation_engine.attendance_fast_path import parse_attendance_query, can_use_fast_path
+from app.services.conversation_engine.business_rule_fast_path import parse_business_rule_query
 from app.services.conversation_engine.model_runner import ModelRunner
 from app.schemas.attendance import now_shanghai
 import time
@@ -367,6 +368,17 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
     # task_id的主要目的是为每次对话或任务提供一个独立的、隔离的运行环境，确保任务之间的数据不相互影响
     # user_id 用于标识发送消息的用户,用户身份标识,会话管理,数据隔离（记忆）,权限控制
     agent = None
+
+    rule_query = parse_business_rule_query(text)
+    if rule_query is not None:
+        rule_route = IntentRouter(register).router(rule_query, user.user_id)
+        if rule_route["action"] == "execute_skill":
+            reply = await handle_skill_action(
+                user=user, text=text, message_id=message_id,
+                router_result=rule_route, db=db, agent=None,
+            )
+            await send_business_reply(message_id, reply, message.get("chat_type", ""))
+            return response.success_response("业务规则操作已处理")
 
     retry_reply = await try_retry_failed_skill(
         session=session,
@@ -1127,7 +1139,7 @@ async def send_business_reply(
         if chat_type != "p2p":
             await _send_feishu_reply(
                 message_id,
-                "考勤信息涉及个人数据，请在与机器人的私聊中查询。"
+                "此功能需要在与机器人的私聊中使用，请私聊机器人后重试。"
             )
             return
 

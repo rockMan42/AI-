@@ -43,7 +43,7 @@ REQUISITION_TOOL_NAMES = (
     "submit_requisition",
     "query_requisition",
 )
-AGENT_MODEL = "qwen3.8-2.4t-a95b"
+AGENT_MODEL = "qwen3.8-max-0902"
 AGENT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 def _create_agent(settings: Settings) -> AIAgent:
@@ -208,7 +208,7 @@ async def call_knowledge_search(
                 raw = await asyncio.to_thread(registry.dispatch, TOOL_NAME, arguments)
                 return _decode_knowledge_result(raw)
     except TimeoutError:
-        raise RAGError("知识检索超时") from None
+        raise RAGError("知识问答处理超时，请稍后重试") from None
 
 
 def _decode_knowledge_result(raw) -> KnowledgeSearchResponse:

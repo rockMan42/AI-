@@ -19,6 +19,8 @@ from app.services.expense.approval_service import approval_detail
 from app.security.auth import get_current_user, require_admin
 from app.services.expense.expense_service import ExpenseService
 from app.services.expense.rules import ExpenseError
+from app.services.business_rules.common import RuleError
+from app.schemas.permission import AccessDenied, PermissionUnavailable
 from app.services.expense.approval_mock import (
     MockApprovalInput,
     advance_mock,
@@ -32,8 +34,11 @@ log = logging.getLogger(__name__)
 async def invoke(operation):
     try:
         return {"code": 200, "data": await operation}
-    except ExpenseError as exc:
+    except (ExpenseError, RuleError) as exc:
         raise HTTPException(exc.status_code, str(exc)) from None
+    except (AccessDenied, PermissionUnavailable):
+        # 由应用统一处理权限错误，避免兼容管理入口把 403 包装成 503。
+        raise
     except FinanceMCPError:
         raise HTTPException(503, "财务服务暂不可用") from None
     except Exception:
@@ -167,7 +172,7 @@ async def finance(
 @router.post("/admin/expense-rules")
 async def create_rule(
     body: ExpenseRuleInput,
-    user: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ):
     return await invoke(service.save_rule(user.user_id, None, body))
 
@@ -176,19 +181,19 @@ async def create_rule(
 async def update_rule(
     rule_id: int,
     body: ExpenseRuleInput,
-    user: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ):
     return await invoke(service.save_rule(user.user_id, rule_id, body))
 
 
 @router.get("/admin/expense-policy")
-async def get_policy(user: User = Depends(require_admin)):
-    return await invoke(service.get_policy())
+async def get_policy(user: User = Depends(get_current_user)):
+    return await invoke(service.get_policy(user.user_id))
 
 @router.put("/admin/expense-policy")
 async def update_policy(
     body: ExpensePolicyInput,
-    user: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ):
     return await invoke(service.save_policy(user.user_id, body))
 
@@ -246,4 +251,3 @@ async def run_expense_test_task(
         return result
 
     return await invoke(operation())
-

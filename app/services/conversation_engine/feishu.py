@@ -229,8 +229,20 @@ async def _send_feishu_card_reply(
                 raise
             await asyncio.sleep(0.2)
 
+    try:
+        payload = resp.json()
+    except ValueError:
+        payload = {}
+    if resp.status_code >= 400 or payload.get("code") != 0:
+        # 仅输出飞书错误码及追踪 ID，避免把卡片内容或凭据写入日志。
+        import logging
+        logging.getLogger(__name__).error(
+            "feishu_card_reply_failed http_status=%s code=%s log_id=%s",
+            resp.status_code,
+            payload.get("code"),
+            payload.get("log_id"),
+        )
     resp.raise_for_status()
-    payload = resp.json()
 
     if payload.get("code") != 0:
         # 不把返回正文或卡片内容写入异常。

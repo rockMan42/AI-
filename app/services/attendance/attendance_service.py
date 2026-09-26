@@ -46,6 +46,26 @@ class AttendanceService:
         leave_year = request.year if request.year is not None else current.year
         tasks = {}
 
+        from app.config.settings import get_settings
+        if get_settings().business_rules_enabled and request.query_type != "leave_balance":
+            from app.services.business_rules.attendance_adapter import recalculate_month
+            computed = await recalculate_month(request, target.user_id, self.session_factory)
+            result = {
+                "user_id": str(target.user_id), "user_name": target.name,
+                "query_type": request.query_type, "month": request.month,
+                "query_date": request.query_date.isoformat() if request.query_date else None,
+                "status_filter": request.status_filter, "leave_year": leave_year,
+                "queried_at": current.isoformat(), "source": "原始考勤记录，按最新规则重算",
+                "rule_version": computed["rule_version"], "calculation_mode": "latest_rule",
+            }
+            if request.query_type in {"attendance", "punch_record", "all"}:
+                result["punch_records"] = computed["punch_records"]
+            if request.query_type in {"attendance", "late_count", "all"}:
+                result["late_stats"] = computed["late_stats"]
+            if request.query_type == "all":
+                result["leave_balances"] = await self._leave_balances(target.user_id, leave_year)
+            return result
+
         async with asyncio.TaskGroup() as group:
             if request.query_type in {
                 "attendance", "punch_record", "all",

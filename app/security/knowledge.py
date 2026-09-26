@@ -58,7 +58,7 @@ def decode_identity_context(token: str, settings: Settings) -> dict:
         if not isinstance(payload["sub"], str) or not payload["sub"]:
             raise jwt.InvalidTokenError()
         if (type(payload["deadline"]) not in (float, int)
-                or not time.time() < payload["deadline"] <= time.time() + 5.1
+                or not time.time() < payload["deadline"] <= time.time() + settings.rag_query_timeout_seconds + 0.1
                 or not isinstance(payload["request_id"], str)
                 or not re.fullmatch(r"[a-f0-9]{32}", payload["request_id"])):
             raise jwt.InvalidTokenError()

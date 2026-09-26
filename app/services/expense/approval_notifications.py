@@ -12,7 +12,7 @@ from app.models.expense_approval import (
     ExpenseNotification,
 )
 from app.security.auth import ACTIVE_STATUSES
-from app.services.conversation_engine.feishu import send_feishu_card
+from app.services.notification.legacy import send_feishu_card
 from app.services.expense.approval_cards import timeout_card
 from app.services.expense.approval_state import POLL_STATUSES
 from app.services.holiday_cron import HolidayError, lease

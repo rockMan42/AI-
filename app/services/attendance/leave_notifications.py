@@ -28,6 +28,9 @@ _stop = None
 
 
 async def track_leave_approvals() -> int:
+    from app.config.settings import get_settings
+    if get_settings().notification_enabled:
+        return 0
     service = LeaveService()
     last_id = 0
     escalated = 0
@@ -190,30 +193,37 @@ async def deliver_notifications(limit: int = 100) -> None:
 
         try:
             async with asyncio.timeout(15):
-                token = await _get_tenant_access_token()
-                await wait_feishu_send_slot()
-                response = await get_feishu_client().post(
-                    f"{FEISHU_API_BASE}/im/v1/messages",
-                    params={"receive_id_type": "open_id"},
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={
-                        "receive_id": item["receiver_open_id"],
-                        "msg_type": item["payload"]["msg_type"],
-                        "content": json.dumps(
-                            item["payload"]["content"],
-                            ensure_ascii=False,
-                        ),
-                        "uuid": uuid5(
-                            NAMESPACE_URL,
-                            "leave:" + item["event_key"],
-                        ).hex,
-                    },
-                )
-                response.raise_for_status()
-                payload = response.json()
-                if payload.get("code") != 0:
-                    raise RuntimeError("飞书通知发送失败")
-                message_id = payload.get("data", {}).get("message_id")
+                from app.config.settings import get_settings
+                if get_settings().notification_enabled:
+                    from app.services.notification.legacy import send_feishu_card
+                    content = item["payload"]["content"]
+                    card = content if item["payload"]["msg_type"] == "interactive" else {
+                        "header": {"title": {"tag": "plain_text", "content": "请假通知"}},
+                        "elements": [{"tag": "markdown", "content": content.get("text", "请查看请假通知")}],
+                    }
+                    message_id = await send_feishu_card(
+                        item["receiver_open_id"], card,
+                        uuid5(NAMESPACE_URL, "leave:" + item["event_key"]).hex,
+                    )
+                else:
+                    token = await _get_tenant_access_token()
+                    await wait_feishu_send_slot()
+                    response = await get_feishu_client().post(
+                        f"{FEISHU_API_BASE}/im/v1/messages",
+                        params={"receive_id_type": "open_id"},
+                        headers={"Authorization": f"Bearer {token}"},
+                        json={
+                            "receive_id": item["receiver_open_id"],
+                            "msg_type": item["payload"]["msg_type"],
+                            "content": json.dumps(item["payload"]["content"], ensure_ascii=False),
+                            "uuid": uuid5(NAMESPACE_URL, "leave:" + item["event_key"]).hex,
+                        },
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                    if payload.get("code") != 0:
+                        raise RuntimeError("飞书通知发送失败")
+                    message_id = payload.get("data", {}).get("message_id")
                 sent = True
         except Exception as exc:
             log.warning(
