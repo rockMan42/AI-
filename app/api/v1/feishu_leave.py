@@ -13,7 +13,9 @@ from app.schemas.leave import ApprovalInput
 from app.security.auth import ACTIVE_STATUSES
 from app.security.feishu_event import decode_feishu_event
 from app.services.attendance.leave_chat import finish_leave_flow
+from app.services.attendance.leave_cards import card as leave_card, reject_form_card, request_card
 from app.services.attendance.leave_service import LeaveError, LeaveService
+from app.services.attendance.feishu_card import text_block
 
 
 log = logging.getLogger(__name__)
@@ -71,30 +73,46 @@ async def handle_leave_card_data(data: dict):
             actor = await callback_actor(open_id)
             service = LeaveService()
             result = None
+            updated_card = None
 
             if operation == "confirm":
                 result = await service.submit(open_id, identifier)
                 message = f"已提交：{result['request_id']}"
+                updated_card = request_card(result)
             elif operation == "cancel_draft":
                 result = await service.cancel_draft(open_id, identifier)
                 message = "已取消本次填写"
+                updated_card = leave_card("请假填写已取消", [text_block(message)], "grey")
             elif operation == "approve":
-                await service.decide(
+                result = await service.decide(
                     open_id,
                     identifier,
                     ApprovalInput(action="approve"),
                 )
                 message = "审批通过"
+                updated_card = request_card(result)
+            elif operation == "reject":
+                fields = (event.get("action") or {}).get("form_value") or {}
+                if not isinstance(fields, dict):
+                    raise LeaveError("驳回原因格式无效", 422)
+                result = await service.decide(
+                    open_id, identifier,
+                    ApprovalInput(action="reject", reject_reason=str(fields.get("reason") or "")),
+                )
+                message = "审批已驳回"
+                updated_card = request_card(result)
             elif operation == "cancel_request":
-                await service.cancel(open_id, identifier)
+                result = await service.cancel(open_id, identifier)
                 message = "申请已撤销"
+                updated_card = request_card(result)
             elif operation == "reject_hint":
                 detail = await service.detail(open_id, identifier)
                 if not detail["can_approve"]:
                     raise LeaveError("只有指定审批人可以审批", 403)
                 if detail["status"] != "pending":
                     raise LeaveError("申请已处理")
-                message = f"请私聊回复：拒绝请假 {identifier} 拒绝原因"
+                message = "请填写驳回原因"
+                updated_card = reject_form_card("填写请假驳回原因", value)
             else:
                 raise LeaveError("不支持的操作", 422)
 
@@ -109,7 +127,10 @@ async def handle_leave_card_data(data: dict):
             except TimeoutError:
                 pass
 
-        return {"toast": {"type": "success", "content": message}}
+        response = {"toast": {"type": "success", "content": message}}
+        if updated_card is not None:
+            response["card"] = {"type": "raw", "data": updated_card}
+        return response
     except LeaveError as exc:
         # 真正的HTTP403，不能只在JSON正文中放code=403。
         if exc.status_code == 403:

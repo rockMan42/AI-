@@ -34,6 +34,20 @@ def card(title: str, elements: list[dict], color: str = "blue") -> dict:
     }
 
 
+def reject_form_card(title: str, value: dict) -> dict:
+    return {
+        "schema": "2.0", "config": {"width_mode": "fill"},
+        "header": {"title": {"tag": "plain_text", "content": title}},
+        "body": {"elements": [{"tag": "form", "name": "approval_reject", "elements": [
+            {"tag": "input", "name": "reason",
+             "label": {"tag": "plain_text", "content": "驳回原因"}, "required": True},
+            {"tag": "button", "name": "submit_reject", "type": "primary",
+             "form_action_type": "submit", "text": {"tag": "plain_text", "content": "确认驳回"},
+             "behaviors": [{"type": "callback", "value": {**value, "operation": "reject"}}]},
+        ]}]},
+    }
+
+
 def summary(data: dict) -> str:
     return (
         f"类型：{LEAVE_LABELS[data['leave_type']]}\n"
