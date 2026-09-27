@@ -315,9 +315,23 @@ async def send_feishu_card(
             "uuid": message_uuid,
         },
     )
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    if response.status_code >= 400 or data.get("code") != 0:
+        import logging
+        logging.getLogger(__name__).error(
+            "feishu_notification_send_failed http_status=%s code=%s msg=%s log_id=%s",
+            response.status_code,
+            data.get("code"),
+            str(data.get("msg") or "")[:200],
+            data.get("log_id") or response.headers.get("x-tt-logid"),
+        )
     response.raise_for_status()
 
-    data = response.json()
     if data.get("code") != 0:
         raise RuntimeError("飞书通知发送失败")
 

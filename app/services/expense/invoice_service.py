@@ -155,10 +155,10 @@ def validated_corrections(values: dict) -> dict:
     for name, value in values.items():
         normalized = normalize_value(name, value)
         if value is not None and normalized is None:
-            raise InvoiceError(f"字段 {name} 的值 {value} 不合法", 422)
+            raise InvoiceError(f"{FIELD_LABELS[name]}格式不正确，请检查后重试", 422)
 
         if isinstance(normalized, str) and len(normalized) > 500:
-            raise InvoiceError(f"字段 {name} 的值 {value} 长度超过 500", 422)
+            raise InvoiceError(f"{FIELD_LABELS[name]}内容过长，请精简后重试", 422)
 
         result[name] = normalized
 
@@ -308,17 +308,17 @@ class InvoiceService:
                 else:
                     payload.update(corrections)
 
-                    if payload.get("error") and not all(
+                    if not all(
                             payload.get(name) is not None
                             for name in (
                                     "invoice_type",
+                                    "invoice_number",
                                     "invoice_date",
                                     "total_amount",
                             )
                     ):
                         raise InvoiceError(
-                            "请重新上传，或补全发票类型、"
-                            "开票日期和价税合计",
+                            "请补全发票类型、号码、开票日期和价税合计后再确认",
                             422,
                         )
 
@@ -402,7 +402,5 @@ class InvoiceService:
         }[suffix]
 
         return data, mime
-
-
 
 

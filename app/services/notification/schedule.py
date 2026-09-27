@@ -50,3 +50,20 @@ async def sync_all():
         rows = list(await db.scalars(select(NotificationSchedule)))
     for row in rows:
         sync_scene(row.scene, config=row)
+
+
+async def audit_registration() -> list[str]:
+    """只读核对已启用场景的 Hermes 任务，由显式脚本负责实际注册。"""
+    async with create_session() as db:
+        rows = list(await db.scalars(select(NotificationSchedule).where(
+            NotificationSchedule.enabled.is_(True),
+        )))
+    jobs = {job["name"]: job for job in list_jobs(include_disabled=True)}
+    if str(get_timezone()) != "Asia/Shanghai":
+        return [row.scene for row in rows]
+    return [
+        row.scene for row in rows
+        if (name := f"notification-{row.scene}") not in jobs
+        or not jobs[name].get("enabled")
+        or jobs[name].get("schedule") != row.cron_expr
+    ]

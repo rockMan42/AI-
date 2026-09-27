@@ -228,7 +228,6 @@ def build_status_card(
 
     lines = [
         f"**{icon} {STATUS_TEXT[status]}**",
-        f"申领单号：REQ-{requisition.id}",
         f"物资：{requisition.item_name} × "
         f"{requisition.quantity}",
     ]
@@ -280,7 +279,13 @@ def build_status_card(
             {
                 "tag": "markdown",
                 "content": "\n".join(lines),
-            }
+            },
+            {"tag": "action", "actions": [{
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "刷新审批进度"},
+                "value": {"module": "requisition", "operation": "status",
+                          "requisition_id": requisition.id},
+            }]},
         ],
     }
 
@@ -360,7 +365,7 @@ async def _check_overtime_warning(
             {
                 "tag": "markdown",
                 "content": (
-                    f"申领单 REQ-{requisition.id} 已等待 "
+                    "您的物资申领已等待 "
                     f"{elapsed} 个工作日。\n"
                     f"物资：{requisition.item_name}\n"
                     "建议联系当前审批人了解进度。"
@@ -453,9 +458,9 @@ async def execute_approval_poll(
             try:
                 status_data = await call_requisition_tool(
                     "query_requisition",
-                    {"requisition_id": requisition_id,
-                                "user_id": requisition.user_id,
-                                "system": True},
+                    {"requisition_id": requisition_id},
+                    user_id=requisition.user_id,
+                    system=True,
                 )
 
             except Exception:

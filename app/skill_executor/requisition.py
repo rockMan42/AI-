@@ -8,6 +8,7 @@ from app.skill_executor.base import BaseSkillExecutor, SkillResult
 from app.hermes.requisition_mcp_client import (
     call_requisition_tool,
 )
+from app.services.requisition.approval_poll_service import build_status_card
 
 class RequisitionSkillExecutor(BaseSkillExecutor):
 
@@ -76,8 +77,8 @@ class RequisitionStatusQueryExecutor(BaseSkillExecutor):
         try:
             data = await call_requisition_tool(
                 "query_requisition",
-                {"requisition_id": row.id,
-                            "user_id": int(context.user_id)},
+                {"requisition_id": row.id},
+                user_id=int(context.user_id),
             )
         except Exception:
             return SkillResult(
@@ -85,25 +86,5 @@ class RequisitionStatusQueryExecutor(BaseSkillExecutor):
                 "OA 状态暂时无法查询，请稍后重试",
             )
 
-        lines = [
-            f"申领单号：REQ-{row.id}",
-            f"物资：{row.item_name} × {row.quantity}",
-            f"当前状态：{data.get('status_text', data['status'])}",
-        ]
-
-        current = data.get("current_approver")
-        if isinstance(current, dict):
-            current = current.get("approver_name")
-        if current:
-            lines.append(f"当前审批人：{current}")
-
-        chain = data.get("approval_chain") or []
-        if chain:
-            chain_text = " → ".join(
-                f"{node.get('approver_name', '审批人')}"
-                f"{'✅' if node.get('action') in {'approve', 'approved'} else '🔄'}"
-                for node in chain
-            )
-            lines.append(f"审批链路：{chain_text}")
-
-        return SkillResult(True, "\n".join(lines))
+        return SkillResult(True, "申领审批进度已更新",
+                           card=build_status_card(row, data))

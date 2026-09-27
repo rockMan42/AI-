@@ -13,9 +13,9 @@ class Settings(BaseSettings):
     app_name: str = "AI数字员工平台"
     app_prefix: str = "/api/v1"
     debug: bool = False
-    attendance_fast_path_enabled: bool = False
-    intent_timeout_seconds: float = Field(default=10.0, gt=0, le=30)
-    intent_queue_timeout_seconds: float = Field(default=1.0, gt=0, le=5)
+    attendance_fast_path_enabled: bool = True
+    intent_timeout_seconds: float = Field(default=60.0, gt=0, le=90)
+    intent_queue_timeout_seconds: float = Field(default=5.0, gt=0, le=10)
     intent_concurrency: int = Field(default=5, ge=1, le=20)
 
     # Mysql 连接配置
@@ -172,10 +172,11 @@ class Settings(BaseSettings):
     oa_requisition_base_url: str = "http://127.0.0.1:8080"
 
     oa_requisition_timeout_seconds: float = Field(
-        default=10.0,
+        default=30.0,
         gt=0,
-        le=30,
+        le=60,
     )
+    requisition_card_timeout_seconds: float = Field(default=60.0, gt=0, le=120)
 
     # 仅允许开发环境使用状态模拟接口
     requisition_mock_enabled: bool = False

@@ -203,7 +203,7 @@ class LeaveService:
                 days = await calculate_year_days(
                     db, body.start_date, body.end_date,
                 )
-                await self._check_balance(
+                balances = await self._check_balance(
                     db, actor.user_id, body.leave_type, days,
                 )
                 await self._check_overlap(db, actor.user_id, body)
@@ -225,6 +225,10 @@ class LeaveService:
                     "duration_days": str(total_days(days)),
                     "approver_id": manager.user_id,
                     "approver_name": manager.name,
+                    "remaining_days": {
+                        str(year): str(balance.remaining_days)
+                        for year, balance in balances.items()
+                    },
                 }
                 draft = LeaveDraft(
                     id=uuid4().hex,
@@ -239,6 +243,15 @@ class LeaveService:
                 db.add(draft)
                 result = {"draft_id": draft.id, **payload}
             return result
+
+    async def draft_detail(self, actor_open_id: str, draft_id: str) -> dict:
+        async with create_session() as db:
+            actor = await self._actor(db, actor_open_id)
+            draft = await self._draft(db, actor, draft_id)
+            if draft.status != "ready" or draft.expires_at <= utc_now():
+                raise LeaveError("确认卡片已失效，请重新填写申请")
+            return {"draft_id": draft.id, "flow_key": draft.flow_key,
+                    **draft.payload}
 
     async def _draft(self, db, actor, draft_id):
         draft = await db.scalar(
@@ -334,9 +347,8 @@ class LeaveService:
                         "msg_type": "text",
                         "content": {
                             "text": (
-                                f"请假申请已提交，编号：{row.request_id}，"
-                                "当前状态：待审批。\n"
-                                f"查询详情可回复：查询请假 {row.request_id}"
+                                "请假申请已提交，当前状态：待审批。"
+                                "审批结果会通过飞书通知您。"
                             )
                         },
                     },

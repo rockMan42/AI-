@@ -42,6 +42,12 @@ def status_card(expense, event) -> dict:
 
     elements = [{"tag": "markdown", "content": "\n".join(lines)}]
 
+    elements.append({"tag": "action", "actions": [{
+        "tag": "button", "text": {"tag": "plain_text", "content": "刷新审批进度"},
+        "value": {"module": "expense", "operation": "status",
+                  "expense_id": expense.id},
+    }]})
+
     if status in REJECTED_STATUSES:
         elements.append({
             "tag": "action",
@@ -91,7 +97,13 @@ def query_card(data: dict) -> dict:
             f"审批人：{safe_text(item['approver_name'] or '系统')}\n"
             f"意见：{safe_text(item['comment'] or '无')}"
         )
-    return card(
+    result = card(
         "报销审批记录",
         [{"tag": "markdown", "content": "\n".join(lines)}],
     )
+    result["elements"].append({"tag": "action", "actions": [{
+        "tag": "button", "text": {"tag": "plain_text", "content": "刷新审批进度"},
+        "value": {"module": "expense", "operation": "status",
+                  "expense_id": data["expense_id"]},
+    }]})
+    return result

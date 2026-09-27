@@ -1,4 +1,9 @@
 from pydantic import ValidationError
+from sqlalchemy import select
+
+from app.core.database import create_session
+from app.models import User
+from app.security.auth import ACTIVE_STATUSES
 
 from app.schemas.business_rule import (
     RuleCandidate,
@@ -82,10 +87,22 @@ async def handle_rule_card(data):
                                owner_open_id=open_id, group=value.get("group"))
         elif value.get("action") == "preview":
             if value.get("form_revision") != RULE_FORM_REVISION or value.get("form_format") != "fields":
-                raise RuleError(f"这张编辑卡片已更新，请重新发送“编辑{label(rule_type)}”并打开新卡片", 409)
+                raise RuleError("这张编辑卡片已更新，请重新查询规则并打开新卡片", 409)
             fields = action.get("form_value") or {}
             if not isinstance(fields, dict):
                 raise RuleError("表单内容无效，请重新打开编辑卡片")
+            group = value.get("group")
+            if (group and group.startswith("node_")
+                    and str(fields.get("actor_user_id") or "").strip()):
+                name = str(fields["actor_user_id"]).strip()
+                async with create_session() as db:
+                    people = (await db.scalars(select(User).where(
+                        User.user_id == int(name) if name.isdigit() else User.name == name,
+                        User.status.in_(ACTIVE_STATUSES),
+                    ).limit(2))).all()
+                if len(people) != 1:
+                    raise RuleError("未找到唯一的在职审批人，请填写完整姓名", 422)
+                fields = {**fields, "actor_user_id": str(people[0].user_id)}
             current = await service.get(principal, rule_type)
             if current["version"] != value.get("expected_version"):
                 raise RuleError("规则已更新，请重新打开编辑卡片", 409)
@@ -143,7 +160,7 @@ async def handle_rule_card(data):
             confirmation_diff(preview["diff"])
             key = (data.get("header") or {}).get("event_id")
             if not key:
-                raise RuleError("卡片事件缺少唯一编号")
+                raise RuleError("卡片验证失败，请重新打开最新编辑卡片")
             candidate = await service.candidate(
                 principal,
                 rule_type,

@@ -13,7 +13,7 @@ LABELS = {
     "late_threshold_minutes": "迟到宽限（分钟）", "early_leave_threshold_minutes": "早退宽限（分钟）",
     "chains": "审批路线", "default_chain": "默认审批路线", "nodes": "审批步骤", "edges": "步骤顺序",
     "id": "编号", "request_type": "申请类型", "min_amount": "金额下限（元）", "max_amount": "金额上限（元）",
-    "stage": "审批环节", "actor": "审批人", "kind": "审批人来源", "user_id": "员工编号",
+    "stage": "审批环节", "actor": "审批人", "kind": "审批人来源", "user_id": "指定员工",
     "from": "前一步骤", "to": "后一步骤", "rule_name": "规则名称", "rule_category": "费用分类",
     "city_tier": "城市等级", "position_level": "适用职级", "expense_type": "费用类型",
     "effective_date": "生效日期", "expiry_date": "失效日期", "status": "启用状态", "version": "版本",
@@ -58,6 +58,8 @@ def label(key):
 
 
 def value_text(value, key=""):
+    if key == "user_id":
+        return "未指定" if value is None else "已指定员工"
     if value is None:
         return "不限" if key in {"max_amount", "expiry_date"} else "未设置"
     if isinstance(value, bool):
@@ -179,6 +181,8 @@ def form_inputs(data, group=None):
     for index, (path, value) in enumerate(editable_fields(data)):
         if not group_allows(path, group):
             continue
+        if group and group.startswith("node_") and path[-1] == "user_id":
+            continue
         key = str(path[-1])
         title = " · ".join(f"第 {p + 1} 项" if isinstance(p, int) else label(p) for p in path)
         mandatory_invoice_check = (
@@ -212,19 +216,30 @@ def form_inputs(data, group=None):
                 "default_value": default,
                 "placeholder": {"tag": "plain_text", "content": "留空表示不限或未设置" if value is None else "请填写"},
                 "required": value is not None and value != ""})
-    if group and group.startswith("node_") and "user_id" not in data.get("actor", {}):
+    if group and group.startswith("node_"):
         result.append({"tag": "input", "name": "actor_user_id",
-                       "label": {"tag": "plain_text", "content": "指定员工编号（选择指定员工时填写）"},
-                       "placeholder": {"tag": "plain_text", "content": "直属主管可留空"},
+                       "label": {"tag": "plain_text", "content": "指定审批人姓名"},
+                       "placeholder": {"tag": "plain_text", "content": "指定员工时填写完整姓名；保留现有审批人可留空"},
                        "required": False})
     return result
 
 
 def apply_form(data, fields, group=None):
     result = deepcopy(data)
+    legacy_user_fields = {
+        f"field_{index}"
+        for index, (path, _) in enumerate(editable_fields(data))
+        if group and group.startswith("node_") and path[-1] == "user_id"
+    }
+    if legacy_user_fields and not str(fields.get("actor_user_id") or "").strip():
+        old_field = next(iter(legacy_user_fields))
+        if old_field in fields:
+            fields = {**fields, "actor_user_id": fields[old_field]}
     visible = {}
     for index, (path, _) in enumerate(editable_fields(data)):
         if not group_allows(path, group):
+            continue
+        if group and group.startswith("node_") and path[-1] == "user_id":
             continue
         if (isinstance(data, dict)
             and (data.get("condition_json") or {}).get("field")
@@ -232,8 +247,8 @@ def apply_form(data, fields, group=None):
             and path[-1] in {"allow_override", "severity"}):
             continue
         visible[f"field_{index}"] = path
-    extra = {"actor_user_id"} if group and group.startswith("node_") and "user_id" not in data.get("actor", {}) else set()
-    unexpected = set(fields) - set(visible) - {"change_summary"} - extra
+    extra = {"actor_user_id"} if group and group.startswith("node_") else set()
+    unexpected = set(fields) - set(visible) - {"change_summary"} - extra - legacy_user_fields
     if unexpected:
         raise RuleError("卡片字段不匹配，请重新打开最新编辑卡片", 409)
     missing = set(visible) - set(fields)
@@ -241,6 +256,8 @@ def apply_form(data, fields, group=None):
         raise RuleError("表单内容不完整，请检查必填项后重试", 422)
     for index, (path, old) in enumerate(editable_fields(data)):
         if not group_allows(path, group):
+            continue
+        if group and group.startswith("node_") and path[-1] == "user_id":
             continue
         name = f"field_{index}"
         if name not in fields:
@@ -276,7 +293,7 @@ def apply_form(data, fields, group=None):
         actor = result["actor"]
         if actor["kind"] == "direct_manager":
             if str(fields.get("actor_user_id") or "").strip():
-                raise RuleError("选择直属主管时，无需填写指定员工编号")
+                raise RuleError("选择直属主管时，无需填写指定审批人")
             actor.pop("user_id", None)
         elif actor["kind"] == "user":
             raw_user_id = fields.get("actor_user_id", actor.get("user_id"))
@@ -287,6 +304,6 @@ def apply_form(data, fields, group=None):
                 if user_id <= 0:
                     raise ValueError()
             except (TypeError, ValueError):
-                raise RuleError("选择指定员工后，请填写有效的员工编号") from None
+                raise RuleError("请选择指定审批人并填写完整姓名") from None
             actor["user_id"] = user_id
     return result

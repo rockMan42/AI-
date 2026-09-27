@@ -25,6 +25,13 @@ DRAFT_PREFIX = "dep:tmp:requisition_draft"
 USER_DRAFT_PREFIX = "dep:tmp:requisition_draft:user"
 DRAFT_TTL_SECONDS = 30 * 60
 logger = logging.getLogger(__name__)
+DISCARD_DRAFT_SCRIPT = """
+redis.call('DEL', KEYS[1])
+if redis.call('GET', KEYS[2]) == ARGV[1] then
+    redis.call('DEL', KEYS[2])
+end
+return 1
+"""
 
 STATUS_TEXT = {
     "pending": "待审批",
@@ -166,6 +173,8 @@ class RequisitionService:
         db: AsyncSession,
         user: User,
         slots: dict,
+        *,
+        replace_draft_id: str | None = None,
     ) -> dict:
         category = str(
             slots.get("item_category") or ""
@@ -186,6 +195,9 @@ class RequisitionService:
             "purpose": slots.get("purpose"),
             "expected_return_date":
                 slots.get("expected_return_date"),
+            "required_fields": [
+                rule["display_name"] for rule in rules if rule["required"]
+            ],
             "client_request_id": uuid.uuid4().hex,
             "created_at": utc_now().isoformat(),
         }
@@ -196,6 +208,13 @@ class RequisitionService:
                 "Redis 尚未初始化",
                 503,
             )
+
+        if replace_draft_id is not None:
+            previous = await self.get_draft(replace_draft_id)
+            if previous is None:
+                raise RequisitionError("原申领卡片已失效，请重新填写")
+            if previous["user_id"] != user.user_id:
+                raise RequisitionError("只能修改本人的申领草稿", 403)
 
         async with client.pipeline(
             transaction=True,
@@ -210,6 +229,8 @@ class RequisitionService:
                 DRAFT_TTL_SECONDS,
                 draft_id,
             )
+            if replace_draft_id is not None:
+                pipe.delete(f"{DRAFT_PREFIX}:{replace_draft_id}")
             await pipe.execute()
 
         return draft
@@ -258,10 +279,11 @@ class RequisitionService:
                 403,
             )
 
-        client = redis_module.redis_client
-        await client.delete(
+        await redis_module.redis_client.eval(
+            DISCARD_DRAFT_SCRIPT, 2,
             f"{DRAFT_PREFIX}:{draft_id}",
             f"{USER_DRAFT_PREFIX}:{user_id}",
+            draft_id,
         )
 
     async def submit_draft(
@@ -281,12 +303,16 @@ class RequisitionService:
                 403,
             )
         user_id = user.user_id
+        current_draft_id = await redis_module.redis_client.get(
+            f"{USER_DRAFT_PREFIX}:{user_id}"
+        )
+        if current_draft_id != draft_id:
+            raise RequisitionError("这张确认卡片已失效，请使用最新卡片")
 
         try:
             result = await call_requisition_tool(
                 "submit_requisition",
                 {
-                    "user_id": user.user_id,
                     "applicant_id": user_id,
                     "item_category":
                         draft["item_category"],
@@ -301,16 +327,17 @@ class RequisitionService:
                     "client_request_id":
                         draft["client_request_id"],
                 },
+                user_id=user_id,
             )
         except RequisitionMCPError as exc:
-            # 不删除草稿，用户可发送“重试”。
+            # 不删除草稿，用户可再次点击确认卡片。
             logger.exception(
                 "requisition_submit_mcp_failed user_id=%s draft_id=%s",
                 user_id,
                 draft_id,
             )
             raise RequisitionError(
-                "申领提交失败，信息已保留，请稍后发送“重试”",
+                "申领提交失败，信息已保留，请稍后再次点击“确认提交”",
                 503,
             ) from exc
 
@@ -366,10 +393,11 @@ class RequisitionService:
             result.get("status", "pending"),
         )
 
-        client = redis_module.redis_client
-        await client.delete(
+        await redis_module.redis_client.eval(
+            DISCARD_DRAFT_SCRIPT, 2,
             f"{DRAFT_PREFIX}:{draft_id}",
             f"{USER_DRAFT_PREFIX}:{user_id}",
+            draft_id,
         )
 
         return result

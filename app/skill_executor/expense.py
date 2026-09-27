@@ -47,7 +47,7 @@ class ExpenseStatusQueryExecutor(BaseSkillExecutor):
         except (TypeError, ValueError):
             return SkillResult(
                 success=False,
-                message="报销单编号无效，请提供正整数编号。",
+                message="未找到这笔报销，请在最近的报销审批卡片中查看进度。",
             )
 
 class ExpenseSkillExecutor(BaseSkillExecutor):

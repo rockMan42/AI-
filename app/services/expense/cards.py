@@ -37,8 +37,6 @@ def invoice_card(
 ) -> dict:
     low_fields = set(item.get("low_confidence_fields", []))
     lines = []
-    if item.get("invoice_id"):
-        lines.append(f"发票ID：{item['invoice_id']}")
 
     for name, label in FIELD_LABELS.items():
         value = item.get(name)
@@ -69,22 +67,40 @@ def invoice_card(
     verified = item.get("verified", False)
 
     if editing:
-        elements.append({
-            "tag": "div",
-            "text": {
-                "tag": "plain_text",
-                "content": (
-                    "请私聊发送以下格式，只填写需要修改的行：\n"
-                    f"修改发票 {request_id} {item['index']}\n"
-                    "购买方名称：正确的公司名称\n"
-                    "价税合计：358.00\n"
-                    "开票日期：2026-08-15\n"
-                    "其他字段使用上面展示的中文名称；"
-                    "不适用填“不适用”。\n"
-                    "发送即表示确认修改后的结果。"
-                ),
+        fields = [
+            {
+                "tag": "input",
+                "name": name,
+                "label": {"tag": "plain_text", "content": label},
+                "default_value": str(item.get(name) if item.get(name) is not None else ""),
+                "placeholder": {"tag": "plain_text", "content": "无法确定时填“不适用”"},
+                "required": False,
+            }
+            for name, label in FIELD_LABELS.items()
+        ]
+        return {
+            "schema": "2.0",
+            "config": {"width_mode": "fill"},
+            "header": {
+                "template": "blue",
+                "title": {"tag": "plain_text", "content": f"核对第 {item['index']} 张发票"},
             },
-        })
+            "body": {"elements": [
+                {"tag": "div", "text": {"tag": "plain_text", "content": "只修改有误的内容；保存后即确认这张发票。"}},
+                {"tag": "form", "name": "invoice_edit", "elements": [
+                    *fields,
+                    {
+                        "tag": "button", "name": "save_invoice", "type": "primary",
+                        "form_action_type": "submit",
+                        "text": {"tag": "plain_text", "content": "保存并确认"},
+                        "behaviors": [{"type": "callback", "value": {
+                            "module": "invoice", "operation": "save_changes",
+                            "request_id": request_id, "index": item["index"],
+                        }}],
+                    },
+                ]},
+            ]},
+        }
 
     if not verified and item.get("invoice_id"):
         elements.append({
@@ -163,19 +179,8 @@ def summary_card(
             "text": {
                 "tag": "plain_text",
                 "content": (
-                    f"本批发票ID：{','.join(invoice_ids)}\n"
-                    "全部确认后，系统会自动识别费用信息并推荐出差申请。\n"
-                    "只有无法自动识别时才需要手动补充。\n\n"
-                    "备用操作示例：\n"
-                    f"补充报销 {invoice_ids[0]}\n"
-                    "费用类型：住宿\n"
-                    "城市：上海\n"
-                    "入住日期：2026-09-10\n"
-                    "退房日期：2026-09-12\n\n"
-                    "餐饮只需填写费用类型；火车、飞机还需填写座席。\n"
-                    "补充完成后可发送：生成报销 出差ID 发票ID列表\n"
-                    "例如：生成报销 501 101,102\n"
-                    "可以跨批次选择发票；不需要报销的发票不选即可。"
+                    "请逐张核对识别结果。全部确认后，"
+                    "系统会继续引导您选择出差申请或补充费用信息。"
                 ),
             },
         })

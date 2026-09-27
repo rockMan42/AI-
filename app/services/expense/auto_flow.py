@@ -50,20 +50,71 @@ def inferred_supplement(ocr: dict) -> ExpenseSupplement:
     )
 
 
-def supplement_needed_card(invoice_ids: list[int], messages: list[str]) -> dict:
+def supplement_needed_card(request_id: str, missing: list[dict]) -> dict:
     return card(
         "还需要补充报销信息",
-        [{
-            "tag": "markdown",
-            "content": (
-                "OCR 已全部确认，但以下信息无法自动确定：\n"
-                + "\n".join(safe_text(message) for message in messages)
-                + "\n\n请使用原有“补充报销 发票ID”方式补充；"
-                  "补充完成后可继续使用“生成报销”作为备用入口。"
-            ),
-        }],
+        [
+            {"tag": "markdown", "content": "请补齐以下发票的费用信息，完成后会继续生成报销单。"},
+            *[
+                {"tag": "action", "actions": [{
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": f"补充第 {item['index']} 张发票"},
+                    "value": {
+                        "module": "expense", "operation": "supplement_open",
+                        "request_id": request_id, "index": item["index"],
+                    },
+                }]}
+                for item in missing
+            ],
+        ],
         "orange",
     )
+
+
+def supplement_form_card(request_id: str, item: dict) -> dict:
+    current = item.get("_expense") or {}
+    expense_type = current.get("expense_type") or infer_expense_type(item)
+    fields = [
+        {"tag": "select_static", "name": "expense_type",
+         "placeholder": {"tag": "plain_text", "content": "选择费用类型"},
+         **({"initial_option": expense_type} if expense_type else {}),
+         "options": [
+             {"text": {"tag": "plain_text", "content": label}, "value": value}
+             for value, label in (("hotel", "住宿"), ("meal", "餐饮"),
+                                  ("train", "火车"), ("flight", "飞机"),
+                                  ("taxi", "出租车"), ("other", "其他"))
+         ]},
+    ]
+    for name, label, source in (
+        ("city", "费用发生城市", "expense_city"),
+        ("check_in", "入住日期（YYYY-MM-DD）", "service_start_date"),
+        ("check_out", "退房日期（YYYY-MM-DD）", "service_end_date"),
+        ("seat", "座席或舱位", "transport_seat"),
+    ):
+        fields.append({
+            "tag": "input", "name": name,
+            "label": {"tag": "plain_text", "content": label},
+            "default_value": str(current.get(name) or item.get(source) or ""),
+            "required": False,
+        })
+    return {
+        "schema": "2.0", "config": {"width_mode": "fill"},
+        "header": {"title": {"tag": "plain_text", "content": f"补充第 {item['index']} 张发票"}},
+        "body": {"elements": [
+            {"tag": "div", "text": {"tag": "plain_text", "content":
+                "住宿需填写城市和入住、退房日期；火车或飞机需填写座席或舱位。"}},
+            {"tag": "form", "name": "expense_supplement", "elements": [
+                *fields,
+                {"tag": "button", "name": "save_supplement", "type": "primary",
+                 "form_action_type": "submit",
+                 "text": {"tag": "plain_text", "content": "保存并继续"},
+                 "behaviors": [{"type": "callback", "value": {
+                     "module": "expense", "operation": "supplement_save",
+                     "request_id": request_id, "index": item["index"],
+                 }}]},
+            ]},
+        ]},
+    }
 
 
 def trip_selection_card(
@@ -116,15 +167,15 @@ def trip_selection_card(
     return card("选择出差申请", elements)
 
 
-async def start_auto_expense_flow(user_id: int, batch: dict) -> None:
-    """最后一张 OCR 确认后，自动补全可识别信息并发送下一步卡片。"""
+async def build_next_expense_card(user_id: int, batch: dict) -> dict | None:
+    """根据已确认发票生成下一步卡片；保留员工手工补充的费用信息。"""
     invoice_ids = [
         item["invoice_id"]
         for item in batch.get("results", [])
         if item.get("invoice_id")
     ]
     if not invoice_ids:
-        return
+        return None
 
     missing = []
     invoice_dates = []
@@ -138,23 +189,25 @@ async def start_auto_expense_flow(user_id: int, batch: dict) -> None:
             .with_for_update()
         )).all())
         if user is None or len(rows) != len(invoice_ids):
-            return
+            return None
 
+        index_by_id = {item["invoice_id"]: item["index"] for item in batch["results"]}
         for row in rows:
             payload = dict(row.ocr_result_json or {})
             try:
                 issued = date.fromisoformat(str(payload.get("invoice_date")))
                 invoice_dates.append(issued)
-                supplement = inferred_supplement(payload)
-                payload["_expense"] = supplement.model_dump(mode="json")
-                row.ocr_result_json = payload
-            except (ValueError, ValidationError) as exc:
-                missing.append(f"发票 {row.id}：{exc}")
-
-        open_id = user.feishu_open_id
+                if payload.get("_expense"):
+                    ExpenseSupplement.model_validate(payload["_expense"])
+                else:
+                    supplement = inferred_supplement(payload)
+                    payload["_expense"] = supplement.model_dump(mode="json")
+                    row.ocr_result_json = payload
+            except (ValueError, ValidationError):
+                missing.append({"index": index_by_id[row.id]})
 
     if missing:
-        next_card = supplement_needed_card(invoice_ids, missing)
+        return supplement_needed_card(batch["request_id"], missing)
     else:
         lower = min(invoice_dates) - timedelta(days=1)
         upper = max(invoice_dates) + timedelta(days=1)
@@ -170,9 +223,22 @@ async def start_auto_expense_flow(user_id: int, batch: dict) -> None:
                 .order_by(BusinessTrip.start_date.desc())
                 .limit(4)
             )).all())
-        next_card = trip_selection_card(
+        return trip_selection_card(
             batch["request_id"], invoice_ids, trips,
         )
+
+
+async def start_auto_expense_flow(user_id: int, batch: dict) -> None:
+    """最后一张 OCR 确认后，自动补全可识别信息并发送下一步卡片。"""
+    next_card = await build_next_expense_card(user_id, batch)
+    if next_card is None:
+        return
+
+    async with create_session() as db:
+        user = await db.get(User, user_id)
+        if user is None:
+            return
+        open_id = user.feishu_open_id
 
     await send_feishu_card(
         open_id,

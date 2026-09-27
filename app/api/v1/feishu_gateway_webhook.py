@@ -8,6 +8,7 @@ from dataclasses import asdict
 from datetime import date
 from app.services.conversation_engine.feishu import (
     _send_feishu_card_reply,
+    update_feishu_card,
 )
 from app.services.permission_events import CONTACT_EVENTS, invalidate_organization
 from app.services.permission_audit import audit_request_id
@@ -32,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config.settings import get_settings
 from app.constant.intent_state import IntentState
 from app.core.database import get_session, create_session
-from app.core.redis_client import set_cache_if_absent
+from app.core.redis_client import get_cache, set_cache, set_cache_if_absent
 from app.services.conversation_engine.conversation_manager import ConversationManager
 from app.hermes.agent import get_agent
 from app.hermes.intent_client import classify_intent
@@ -261,8 +262,28 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
             message_id,
             CONTENT_DEDUP_TTL,
     ):
+        original_message_id = await get_cache(
+            f"dep:sess:content_dedup:{content_fingerprint}"
+        )
+        cached_reply = (
+            await get_cache(f"dep:sess:reply_payload:{original_message_id}")
+            if original_message_id else None
+        )
+        if cached_reply:
+            await send_business_reply(
+                message_id, json.loads(cached_reply), "p2p",
+            )
+            return response.success_response("Duplicate result resent")
+        completed = bool(original_message_id and await get_cache(
+            f"dep:sess:reply:{original_message_id}"
+        ))
+        await _send_feishu_reply(
+            message_id,
+            "刚才的结果已发送，请查看上一条回复。"
+            if completed else "已收到，正在处理刚才的请求，请稍候。",
+        )
         return response.success_response(
-            "Duplicate content ignored"
+            "Duplicate content acknowledged"
         )
 
     if business_allowed and text.startswith("修改发票"):
@@ -432,6 +453,20 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
             await send_business_reply(message_id, reply, message.get("chat_type", ""))
             return response.success_response("飞书回复成功")
 
+    progress_message_id = None
+    try:
+        with phase("feishu_first_feedback"):
+            sent = await _send_feishu_card_reply(message_id, {
+                "config": {"wide_screen_mode": True, "update_multi": True},
+                "header": {"template": "blue", "title": {
+                    "tag": "plain_text", "content": "正在处理"}},
+                "elements": [{"tag": "div", "text": {
+                    "tag": "plain_text", "content": "已收到，正在查询并整理结果，请稍候。"}}],
+            })
+        progress_message_id = (sent.get("data") or {}).get("message_id")
+    except Exception:
+        log.warning("feishu_progress_feedback_failed", exc_info=True)
+
     try:
         # 开始调用大模型 LLM 正在分类意图之前保存意向状态
         session = await conversation_manager.update_intent_state(
@@ -466,11 +501,13 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
 
     except asyncio.TimeoutError:
         log.exception("LLM 请求超时")
-        await _send_feishu_reply(message_id, "系统繁忙，请稍后重试")
+        await send_business_reply(message_id, "处理超时，请稍后重试。", "p2p",
+                                  progress_message_id=progress_message_id)
         return response.success_response("LLM timeout")
     except Exception:
         log.exception("LLM 调用失败")
-        await _send_feishu_reply(message_id, "系统繁忙，请稍后重试")
+        await send_business_reply(message_id, "服务暂不可用，请稍后重试。", "p2p",
+                                  progress_message_id=progress_message_id)
         return response.success_response("LLM failed")
 
     reply = result.get("final_response", "")
@@ -499,7 +536,8 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
                     raise ValueError("节假日意图复核不一致")
                 llm_result = holiday_parsed
             except Exception:
-                await _send_feishu_reply(message_id, "放假安排提取失败，请稍后重试")
+                await send_business_reply(message_id, "放假安排提取失败，请稍后重试。", "p2p",
+                                          progress_message_id=progress_message_id)
                 return response.success_response("Holiday notice extraction failed")
         log.info(
             "意图识别结果 intent=%s confidence=%s slots=%s",
@@ -519,10 +557,8 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
             user.user_id,
             IntentState.INTENT_PENDING,
         )
-        await _send_feishu_reply(
-            message_id,
-            "系统处理出现异常，请稍后重试。",
-        )
+        await send_business_reply(message_id, "系统处理出现异常，请稍后重试。", "p2p",
+                                  progress_message_id=progress_message_id)
         return response.success_response("Invalid LLM response")
 
     action_ = router_result["action"]
@@ -564,6 +600,7 @@ async def feishu_webhook(request: Request,db: AsyncSession = Depends(get_session
         message_id,
         reply_text,
         message.get("chat_type", ""),
+        progress_message_id=progress_message_id,
     )
 
     return response.success_response("飞书回复成功")
@@ -849,41 +886,8 @@ async def handle_skill_action(
     if skill_result.card is not None:
         return skill_result.card
 
-    # 知识回答不再交给 LLM 改写
-    if skill.name in {
-        "policy_query",
-        "leave_apply",
-        "holiday_notice_create",
-        "receipt_confirm",
-        "holiday_notice_query",
-        "requisition_apply",
-    }:
-        return skill_result.message
-
-    prompt = (
-        f"用户问题：{text}\n"
-        f"技能执行结果：{json.dumps(asdict(skill_result), ensure_ascii=False)}\n"
-        "请根据技能执行结果生成简洁、自然的用户回复。"
-    )
-
-    try:
-        result = await conversation(
-            agent,
-            prompt,
-            REPLY_SYSTEM_MESSAGE,
-            message_id,
-        )
-    except Exception as exc:
-        log.error(
-            "Executor failed skill=%s error_type=%s",
-            skill.name,
-            type(exc).__name__,
-        )
-
-    return clean_markdown(
-        result.get("final_response", ""),
-        fallback=skill_result.message,
-    )
+    # 业务执行结果由确定性文案直接呈现，避免二次模型调用改写业务事实。
+    return skill_result.message
 
 # 封装对话逻辑
 async def conversation(
@@ -1133,8 +1137,25 @@ def _build_continuation_context(
 async def send_business_reply(
         message_id:str,
         reply: str | dict,
-        chat_type: str
+        chat_type: str,
+        *,
+        progress_message_id: str | None = None,
 ) -> None:
+    if progress_message_id and chat_type == "p2p":
+        result_card = reply if isinstance(reply, dict) else {
+            "config": {"wide_screen_mode": True},
+            "header": {"template": "blue", "title": {
+                "tag": "plain_text", "content": "处理结果"}},
+            "elements": [{"tag": "div", "text": {
+                "tag": "plain_text", "content": clean_markdown(reply)}}],
+        }
+        try:
+            await update_feishu_card(progress_message_id, result_card)
+            await mark_reply_completed(message_id, reply)
+            return
+        except Exception:
+            log.warning("feishu_progress_update_failed", exc_info=True)
+
     if isinstance(reply,dict):
         if chat_type != "p2p":
             await _send_feishu_reply(
@@ -1146,9 +1167,23 @@ async def send_business_reply(
         await _send_feishu_card_reply(
             message_id,reply
         )
+        await mark_reply_completed(message_id, reply)
         return
 
     await _send_feishu_reply(message_id,clean_markdown(reply))
+    await mark_reply_completed(message_id, reply)
+
+
+async def mark_reply_completed(message_id: str, reply: str | dict) -> None:
+    try:
+        await set_cache(f"dep:sess:reply:{message_id}", "1", CONTENT_DEDUP_TTL)
+        await set_cache(
+            f"dep:sess:reply_payload:{message_id}",
+            json.dumps(reply, ensure_ascii=False),
+            CONTENT_DEDUP_TTL,
+        )
+    except Exception:
+        log.warning("feishu_reply_marker_failed", exc_info=True)
 
 
 async def try_handle_receipt_text(user, text: str, message_id: str):

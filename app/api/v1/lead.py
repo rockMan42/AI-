@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import ValidationError
@@ -11,17 +12,16 @@ from app.models import User
 from app.schemas.lead import FollowUpInput, LeadQuery
 from app.security.auth import get_current_user
 from app.security.lead import LeadError
-from app.services.conversation_engine.conversation_manager import ConversationManager
-from app.services.conversation_engine.register_skill import get_skill_register
-from app.services.conversation_engine.session_store import SessionStore
-from app.services.conversation_engine.slot_collector import SlotCollector
-from app.services.expense.cards import card
 from app.services.lead import LeadService
-from app.services.lead_cards import detail_card, markdown, query_card
+from app.services.lead_cards import (
+    detail_card, follow_up_form, follow_up_saved_card, query_card,
+)
+from app.services.card_form import parse_form_values
 
 
 router = APIRouter(prefix="/leads")
 service = LeadService()
+log = logging.getLogger(__name__)
 
 DB = Annotated[AsyncSession, Depends(get_session)]
 Actor = Annotated[User, Depends(get_current_user)]
@@ -84,10 +84,10 @@ async def handle_lead_card_data(data: dict) -> dict:
                     result_card = query_card(
                         result, params.model_dump(mode="json"),
                     )
-                elif operation in {"detail", "follow_up"}:
+                elif operation in {"detail", "follow_up", "follow_up_save"}:
                     lead_id = value.get("lead_id")
                     if type(lead_id) is not int or lead_id <= 0:
-                        raise LeadError("线索编号无效", 422)
+                        raise LeadError("线索卡片已失效，请重新查询", 422)
 
                     if operation == "detail":
                         history_page = value.get("history_page", 1)
@@ -95,35 +95,28 @@ async def handle_lead_card_data(data: dict) -> dict:
                             raise LeadError("记录页码无效", 422)
                         result = await service.detail(db, actor, lead_id)
                         result_card = detail_card(result, history_page)
-                    else:
+                    elif operation == "follow_up":
                         lead = await service.load(db, actor, lead_id)
                         if lead.assigned_to != actor.user_id:
                             raise LeadError("只能跟进自己负责的线索", 403)
-
-                        skill = get_skill_register().get_skill("lead_follow_up")
-                        if skill is None:
-                            raise LeadError("跟进技能尚未注册", 503)
-
-                        store = SessionStore()
-                        session = await ConversationManager(
-                            store
-                        ).get_or_create_session(
-                            actor.user_id, skill.name, skill,
-                        )
-
-                        # 点击另一条线索时，不携带上一条未完成的跟进内容。
-                        for slot in session.slots.values():
-                            slot.value = None
-                            slot.filled = False
-                            slot.error = None
-                        session.pending_slot = None
-
-                        result = await SlotCollector(store).collect(
-                            session, skill, {"lead_id": lead_id},
-                        )
-                        result_card = card(
-                            f"记录跟进 · {lead.company_name}",
-                            [markdown(result["message"])],
+                        result_card = follow_up_form(lead_id, lead.company_name)
+                    else:
+                        allowed = {"follow_up_type", "content", "outcome",
+                                   "next_action", "next_follow_up"}
+                        try:
+                            fields = parse_form_values(
+                                (event.get("action") or {}).get("form_value") or {}, allowed,
+                            )
+                        except ValueError:
+                            raise LeadError("跟进卡片已失效，请重新打开", 409) from None
+                        body = FollowUpInput.model_validate({
+                            name: field or None
+                            for name, field in fields.items()
+                        })
+                        await service.follow_up(db, actor, lead_id, body)
+                        lead = await service.detail(db, actor, lead_id)
+                        result_card = follow_up_saved_card(
+                            lead["company_name"], body.content,
                         )
                 else:
                     raise LeadError("不支持的线索操作", 422)
@@ -133,6 +126,8 @@ async def handle_lead_card_data(data: dict) -> dict:
             "card": {"type": "raw", "data": result_card},
         }
     except (LeadError, ValidationError, ValueError) as exc:
+        if isinstance(exc, LeadError) and exc.status_code == 403:
+            raise HTTPException(403, str(exc)) from None
         message = (
             "操作参数格式不正确"
             if isinstance(exc, ValidationError) else str(exc)
@@ -145,3 +140,7 @@ async def handle_lead_card_data(data: dict) -> dict:
                 "content": "处理超时，请稍后重试",
             },
         }
+    except Exception:
+        log.exception("lead_card_failed")
+        return {"toast": {"type": "error", "content":
+                "线索暂时无法处理，请稍后重试"}}

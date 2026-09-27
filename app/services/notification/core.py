@@ -11,8 +11,8 @@ from app.core import redis_client as redis_module
 from app.core.database import create_session
 from app.models.notification import NotificationItem, NotificationLog, NotificationSchedule, NotificationTemplate
 from app.models.user import User
-from app.security.auth import ACTIVE_STATUSES
 from app.services.conversation_engine.feishu import send_feishu_card, update_feishu_card
+from app.services.notification.recipients import valid_feishu_open_id
 from app.utils.time import SHANGHAI_TIMEZONE, as_shanghai, utc_now
 
 
@@ -21,6 +21,12 @@ environment = SandboxedEnvironment(undefined=StrictUndefined, autoescape=False)
 QUEUE_KEY = "dep:notification:due"
 SCENES = {
     "approval_reminder", "attendance_alert", "lead_follow", "review_deadline",
+}
+SCENE_PRIORITY = {
+    "approval_reminder": 0,
+    "review_deadline": 1,
+    "attendance_alert": 2,
+    "lead_follow": 3,
 }
 
 
@@ -68,7 +74,7 @@ async def enqueue(
         user = await db.scalar(
             select(User).where(User.user_id == target_user_id).with_for_update()
         )
-        if user is None or user.status not in ACTIVE_STATUSES or not user.feishu_open_id:
+        if user is None or user.status != "active" or not valid_feishu_open_id(user.feishu_open_id):
             return None
         existing = await db.scalar(
             select(NotificationItem.id).where(NotificationItem.event_key == event_key)
@@ -164,6 +170,7 @@ async def enqueue(
 
 
 def _card_for(items: list[NotificationItem], *, summary: bool) -> tuple[str, str, dict]:
+    items = sorted(items, key=lambda item: (SCENE_PRIORITY.get(item.scene, 9), item.id))
     def result(item: NotificationItem) -> str:
         return {"approve": "已通过", "reject": "已驳回"}.get(item.acted_action, "已处理")
 
@@ -224,7 +231,8 @@ async def deliver_one(batch_id: int, *, sender=send_feishu_card, updater=update_
         items = list(await db.scalars(select(NotificationItem).where(
             NotificationItem.log_id == batch.id, NotificationItem.status.in_(("PENDING", "SENT")),
         ).order_by(NotificationItem.id)))
-        if not items or user is None or user.status not in ACTIVE_STATUSES:
+        if (not items or user is None or user.status != "active"
+                or not valid_feishu_open_id(user.feishu_open_id)):
             batch.status = "SKIPPED"
             return True
         from app.services.notification.scenes import valid_item

@@ -200,7 +200,7 @@ def validate_data(rule_type, data):
     try:
         raw = canonical(data)
     except (ValueError, TypeError, RecursionError):
-        raise RuleError("规则必须是有效 JSON") from None
+        raise RuleError("规则内容格式不正确，请检查后重试") from None
     if len(raw.encode()) > 256 * 1024:
         raise RuleError("规则配置不得超过 256 KiB", 413)
 

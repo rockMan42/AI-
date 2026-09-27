@@ -131,7 +131,7 @@ def rule_detail_card(snapshot, page=0, owner_open_id=None):
     card = plain_card(
         f"{label(rule_type)} · 第 {snapshot['version']} 版",
         f"已发布配置 · 第 {page + 1}/{total} 页。\n"
-        f"发送“编辑{label(rule_type)}”可打开编辑表单。",
+        "点击下方按钮可打开编辑表单。",
     )
     if rule_type == "reimbursement":
         if page == 0:
@@ -160,12 +160,12 @@ def rule_detail_card(snapshot, page=0, owner_open_id=None):
             card["elements"].append(_div("默认路线：" + ("已配置" if data.get("default_chain") else "未配置；没有匹配金额时会阻止提交")))
         else:
             route = data["chains"][page - 1] if page <= len(data["chains"]) else data["default_chain"]
-            name = f"路线 {page} · {route['id']}" if page <= len(data["chains"]) else "默认路线"
+            name = f"路线 {page}" if page <= len(data["chains"]) else "默认路线"
             upper = route["max_amount"] or "不限"
             card["elements"].append(_div(f"{name}\n适用申请：报销\n金额：{route['min_amount']} 元（含）至 {upper} 元（不含）"))
             for number, node in enumerate(ordered_nodes(route), 1):
                 actor = node["actor"]
-                who = "直属主管" if actor["kind"] == "direct_manager" else f"员工编号 {actor.get('user_id', '未设置')}"
+                who = "直属主管" if actor["kind"] == "direct_manager" else "指定员工"
                 card["elements"].append(_div(f"第 {number} 步 · {value_text(node['stage'], 'stage')}\n审批人：{who}"))
     else:
         card["elements"].append(_div(
@@ -183,7 +183,7 @@ def rule_detail_card(snapshot, page=0, owner_open_id=None):
             detail = "待 HR 确认新版" if revision and revision > acknowledged else "已确认"
             if state.get("error"):
                 detail = "文档检查异常"
-            lines.append(f"{binding.get('doc_title') or binding['doc_id']}：已确认修订 {acknowledged}，{detail}")
+            lines.append(f"{binding.get('doc_title') or '未命名制度'}：已确认修订 {acknowledged}，{detail}")
         if len(snapshot["bindings"]) > 10:
             lines.append(f"另有 {len(snapshot['bindings']) - 10} 份制度，请在管理接口查看。")
         card["elements"].append(_div("制度关联\n" + "\n".join(lines)))

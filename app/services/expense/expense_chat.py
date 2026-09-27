@@ -1,5 +1,8 @@
 import re
 from datetime import date
+from sqlalchemy import select
+from app.core.database import create_session
+from app.models import Invoice
 from app.services.expense.approval_cards import query_card
 from app.services.expense.approval_service import (
     approval_detail,
@@ -48,8 +51,9 @@ STATUS_NAMES = STATUS_LABELS
 def expense_card(data: dict):
     if data.get("status") == "validation_failed":
         lines = []
+        positions = {invoice_id: index for index, invoice_id in enumerate(data["invoice_ids"], 1)}
         for result in data["results"]:
-            title = f"发票 {result['invoice_id']}"
+            title = f"第 {positions.get(result['invoice_id'], 1)} 张发票"
             if result["passed"]:
                 lines.append(f"{title}：通过")
             for problem in result["failures"]:
@@ -64,22 +68,30 @@ def expense_card(data: dict):
                     )
 
         if data["can_override"]:
-            ids = ",".join(map(str, data["invoice_ids"]))
-            trip = data["trip_id"] or "无"
-            lines.append(
-                f"\n如需申请超标报销，请发送：\n"
-                f"超标报销 {trip} {ids} 超标原因"
-            )
+            return {
+                "schema": "2.0", "config": {"width_mode": "fill"},
+                "header": {"template": "orange", "title": {
+                    "tag": "plain_text", "content": "报销规则校验"}},
+                "body": {"elements": [
+                    {"tag": "markdown", "content": "\n".join(lines)},
+                    {"tag": "form", "name": "expense_override", "elements": [
+                        {"tag": "input", "name": "reason", "required": True,
+                         "label": {"tag": "plain_text", "content": "超标申请原因"}},
+                        {"tag": "button", "name": "submit_override", "type": "primary",
+                         "form_action_type": "submit",
+                         "text": {"tag": "plain_text", "content": "申请超标报销"},
+                         "behaviors": [{"type": "callback", "value": {
+                             "module": "expense", "operation": "prepare_override",
+                             "invoice_ids": data["invoice_ids"], "trip_id": data["trip_id"],
+                         }}]},
+                    ]},
+                ]},
+            }
 
-        return card(
-            "报销规则校验",
-            [{"tag": "markdown", "content": "\n".join(lines)}],
-            "orange",
-        )
+        return card("报销规则校验", [{"tag": "markdown", "content": "\n".join(lines)}], "orange")
 
     lines = [
         f"报销单：{safe_text(data['expense_no'])}",
-        f"编号：{data['expense_id']}",
         f"状态：{STATUS_NAMES.get(data['status'], data['status'])}",
     ]
     for category, amount in data["breakdown"].items():
@@ -124,6 +136,32 @@ def expense_card(data: dict):
     return card("报销单", elements)
 
 
+async def reopened_card(user_id: int, result: dict) -> dict:
+    elements = [{"tag": "markdown", "content":
+                 "原申请和审批记录已保留。请核对需要修改的费用信息，再重新生成报销单。"}]
+    async with create_session() as db:
+        rows = list((await db.scalars(
+            select(Invoice).where(Invoice.id.in_(result["invoice_ids"])).order_by(Invoice.id)
+        )).all())
+    for position, row in enumerate(rows, 1):
+        meta = (row.ocr_result_json or {}).get("_meta") or {}
+        if meta.get("user_id") != user_id:
+            continue
+        elements.append({"tag": "action", "actions": [{
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": f"修改第 {position} 张发票的费用信息"},
+            "value": {"module": "expense", "operation": "supplement_open",
+                      "request_id": meta.get("request_id"), "index": meta.get("index")},
+        }]})
+    elements.append({"tag": "action", "actions": [{
+        "tag": "button", "type": "primary",
+        "text": {"tag": "plain_text", "content": "重新生成报销单"},
+        "value": {"module": "expense", "operation": "prepare",
+                  "invoice_ids": result["invoice_ids"], "trip_id": result["trip_id"]},
+    }]})
+    return card("继续办理报销", elements)
+
+
 async def handle_expense_text(user_id: int, text: str):
     text = text.strip()
 
@@ -152,28 +190,18 @@ async def handle_expense_text(user_id: int, text: str):
         result = await service.reopen_rejected(
             user_id, int(match[1]),
         )
-        ids = ",".join(map(str, result["invoice_ids"]))
-        trip = result["trip_id"] or "无"
-        return (
-            result["message"]
-            + f"\n原发票ID：{ids}"
-            + f"\n修改后可发送：生成报销 {trip} {ids}"
-        )
+        return await reopened_card(user_id, result)
 
     if text == "我的出差":
         trips = await service.trips(user_id)
         if not trips:
             return "暂无可关联的出差申请。"
         return "\n".join(
-            f"{trip['trip_id']}：{trip['destination']}，"
+            f"{trip['destination']}，"
             f"{trip['start_date']} 至 {trip['end_date']}"
             for trip in trips
         )
 
-    match = re.fullmatch(
-        r"(查询报销|取消报销)\s+(\d+)",
-        text,
-    )
     match = re.fullmatch(
         r"(查询报销|取消报销)\s+(\d+)",
         text,
@@ -192,7 +220,7 @@ async def handle_expense_text(user_id: int, text: str):
         lines = text.strip().splitlines()
         match = re.fullmatch(r"补充报销\s+(\d+)", lines[0])
         if not match:
-            raise ExpenseError("格式：补充报销 发票ID，下一行填写费用信息", 422)
+            raise ExpenseError("请在报销卡片中选择需要补充的发票，填写费用信息", 422)
 
         names = {
             "费用类型": "expense_type",
@@ -241,11 +269,6 @@ async def handle_expense_text(user_id: int, text: str):
         return expense_card(await service.prepare(user_id, body))
 
     if text.startswith(("生成报销", "超标报销")):
-        return (
-            "格式：生成报销 出差ID 发票ID列表\n"
-            "例如：生成报销 501 101,102\n"
-            "非出差报销：生成报销 无 101\n"
-            "可以发送“我的出差”查看可用申请。"
-        )
+        return "请先上传并确认发票，再在报销卡片中选择出差申请并提交。"
 
     return None

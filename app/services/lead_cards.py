@@ -47,8 +47,70 @@ def lead_line(item: dict) -> str:
     return (
         f"{' '.join(labels)} **{safe_text(item['company_name'])}**"
         f"｜{STATUS_LABELS[item['status']]}"
-        f"｜评分 {item['priority_score']}"
+        f"｜优先级：{ {'high': '高', 'medium': '中', 'low': '低'}.get(item['priority'], '普通')}"
     )
+
+
+def priority_reason(item: dict) -> str:
+    reasons = []
+    parts = item.get("score_breakdown") or {}
+    if parts.get("budget_score", 0) >= 80:
+        reasons.append("预算较高")
+    if parts.get("interaction_score", 0) >= 60:
+        reasons.append("近30天互动活跃")
+    if parts.get("time_decay_score", 0) >= 80:
+        reasons.append("近期有跟进")
+    if item.get("is_overdue"):
+        reasons.append("超过7天未跟进")
+    return "、".join(reasons) or "按预算、互动和跟进时间综合排序"
+
+
+def follow_up_form(lead_id: int, company_name: str) -> dict:
+    choices = (
+        ("phone", "电话"), ("email", "邮件"), ("visit", "拜访"),
+        ("wechat", "微信"), ("demo", "演示"),
+    )
+    outcomes = (
+        ("positive", "积极"), ("neutral", "一般"),
+        ("negative", "消极"), ("no_answer", "未接通"),
+    )
+    return {
+        "schema": "2.0", "config": {"width_mode": "fill"},
+        "header": {"title": {"tag": "plain_text", "content": f"记录跟进 · {company_name}"}},
+        "body": {"elements": [{"tag": "form", "name": "lead_follow_up", "elements": [
+            {"tag": "select_static", "name": "follow_up_type",
+             "placeholder": {"tag": "plain_text", "content": "选择跟进方式"},
+             "options": [{"text": {"tag": "plain_text", "content": label}, "value": value}
+                         for value, label in choices]},
+            {"tag": "input", "name": "content", "required": True,
+             "label": {"tag": "plain_text", "content": "本次跟进内容"}},
+            {"tag": "select_static", "name": "outcome",
+             "placeholder": {"tag": "plain_text", "content": "选择跟进结果（可选）"},
+             "options": [{"text": {"tag": "plain_text", "content": label}, "value": value}
+                         for value, label in outcomes]},
+            {"tag": "input", "name": "next_action", "required": False,
+             "label": {"tag": "plain_text", "content": "下一步安排（可选）"}},
+            {"tag": "input", "name": "next_follow_up", "required": False,
+             "label": {"tag": "plain_text", "content": "下次跟进时间（可选）"},
+             "placeholder": {"tag": "plain_text", "content": "例如 2026-09-30 09:00"}},
+            {"tag": "button", "name": "save_follow_up", "type": "primary",
+             "form_action_type": "submit",
+             "text": {"tag": "plain_text", "content": "保存跟进记录"},
+             "behaviors": [{"type": "callback", "value": {
+                 "module": "lead", "operation": "follow_up_save", "lead_id": lead_id,
+             }}]},
+        ]}]},
+    }
+
+
+def follow_up_saved_card(company_name: str, content: str) -> dict:
+    return {
+        "schema": "2.0", "config": {"width_mode": "fill"},
+        "header": {"title": {"tag": "plain_text", "content": "跟进记录已保存"}},
+        "body": {"elements": [{"tag": "markdown", "content":
+            f"**{safe_text(company_name)}**\n本次跟进：{safe_text(content[:200])}\n"
+            "需要继续查看时，可重新查询线索。"}]},
+    }
 
 
 def query_card(data: dict, params: dict) -> dict:
@@ -64,6 +126,7 @@ def query_card(data: dict, params: dict) -> dict:
                 lead_line(item)
                 + f"\n联系人：{safe_text(item['contact_name'])}"
                 + f"｜负责人：{safe_text(item['assigned_name'] or '未分配')}"
+                + f"\n排序参考：{priority_reason(item)}"
             ),
             actions(
                 button("查看详情", "detail", lead_id=item["id"]),

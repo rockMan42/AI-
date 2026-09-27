@@ -58,18 +58,19 @@ async def authorize_requisition(
     applicant_id: int | None = None,
 ):
     try:
+        required_claims = ["sub", "tool", "system", "iat", "exp"]
+        if tool == "query_requisition":
+            required_claims.append("resource_id")
         claims = jwt.decode(
             token,
             signing_key(),
             algorithms=["HS256"],
             issuer=get_settings().auth_jwt_issuer,
             audience=AUDIENCE,
-            options={"require": [
-                "sub", "tool", "resource_id", "system", "iat", "exp",
-            ]},
+            options={"require": required_claims},
         )
 
-        if claims["tool"] != tool or claims["resource_id"] != resource_id:
+        if claims["tool"] != tool or claims.get("resource_id") != resource_id:
             raise ValueError
 
         user_id = int(claims["sub"])

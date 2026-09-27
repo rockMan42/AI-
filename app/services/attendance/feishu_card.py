@@ -114,6 +114,13 @@ def build_attendance_card(result: dict) -> dict:
         footer += f"\n按当前考勤规则 v{result['rule_version']} 重算，历史月份结果可能变化"
 
     elements.extend([{"tag": "hr"}, text_block(footer)])
+    elements.append({"tag": "action", "actions": [{
+        "tag": "button",
+        "text": {"tag": "plain_text", "content": "筛选月份、日期或异常"},
+        "value": {"module": "attendance", "operation": "filter",
+                  "target_user_id": result["user_id"],
+                  "query_type": result["query_type"]},
+    }]})
 
     return {
         "config": {"wide_screen_mode": True},
@@ -121,8 +128,84 @@ def build_attendance_card(result: dict) -> dict:
             "template": "blue",
             "title": {
                 "tag": "plain_text",
-                "content": f"您的考勤信息 · {result['user_name']}",
+                "content": f"考勤信息 · {result['user_name']}",
             },
         },
         "elements": elements,
+    }
+
+
+def build_attendance_card_v2(result: dict) -> dict:
+    """表单提交后返回同版本卡片，保留概览、余额及再次筛选入口。"""
+    legacy = build_attendance_card(result)
+    elements = []
+    for item in legacy["elements"]:
+        if item["tag"] == "div" and "fields" in item:
+            elements.extend({"tag": "div", "text": field["text"]}
+                            for field in item["fields"])
+        elif item["tag"] == "action":
+            elements.extend({
+                "tag": "button", "text": button["text"],
+                "behaviors": [{"type": "callback", "value": button["value"]}],
+            } for button in item["actions"])
+        elif item["tag"] != "hr":
+            elements.append(item)
+    return {
+        "schema": "2.0", "config": {"width_mode": "fill"},
+        "header": {"title": {"tag": "plain_text", "content":
+            f"{'假期余额' if result['query_type'] == 'leave_balance' else '考勤信息'}"
+            f" · {result['user_name']}"}},
+        "body": {"elements": elements},
+    }
+
+
+def attendance_filter_card(
+    target_user_id: int, user_name: str, month: str,
+    query_type: str = "attendance",
+) -> dict:
+    if query_type not in {"attendance", "punch_record", "late_count", "leave_balance"}:
+        query_type = "attendance"
+    fields = [{
+        "tag": "select_static", "name": "query_type",
+        "placeholder": {"tag": "plain_text", "content": "选择查询内容"},
+        "initial_option": query_type,
+        "options": [
+            {"text": {"tag": "plain_text", "content": label}, "value": code}
+            for code, label in (("attendance", "考勤概览"),
+                                ("punch_record", "打卡记录"),
+                                ("late_count", "迟到早退统计"),
+                                ("leave_balance", "假期余额"))
+        ],
+    }]
+    for name, label, initial in (
+        ("month", "月份（YYYY-MM）", month),
+        ("query_date", "指定日期（可选，YYYY-MM-DD）", ""),
+        ("target_name", "员工姓名（可选，仅限有权限查询的员工）", ""),
+    ):
+        fields.append({"tag": "input", "name": name, "required": False,
+                       "label": {"tag": "plain_text", "content": label},
+                       "default_value": initial})
+    fields.append({
+        "tag": "select_static", "name": "status_filter",
+        "placeholder": {"tag": "plain_text", "content": "筛选异常（可选）"},
+        "options": [
+            {"text": {"tag": "plain_text", "content": label}, "value": code}
+            for code, label in (("late", "迟到"), ("early_leave", "早退"),
+                                ("absent", "缺勤"), ("leave", "请假"),
+                                ("normal", "正常"))
+        ],
+    })
+    return {
+        "schema": "2.0", "config": {"width_mode": "fill"},
+        "header": {"title": {"tag": "plain_text", "content": f"筛选考勤 · {user_name}"}},
+        "body": {"elements": [{"tag": "form", "name": "attendance_filter",
+            "elements": [*fields, {
+                "tag": "button", "name": "submit_filter", "type": "primary",
+                "form_action_type": "submit",
+                "text": {"tag": "plain_text", "content": "查询考勤"},
+                "behaviors": [{"type": "callback", "value": {
+                    "module": "attendance", "operation": "query",
+                    "target_user_id": target_user_id,
+                }}],
+            }]}]},
     }

@@ -1,5 +1,6 @@
 # FastAPI入口
 from contextlib import AsyncExitStack, asynccontextmanager
+import logging
 from fastapi import FastAPI
 from app.config.settings import get_settings
 from app.core.database import init_db, close_db
@@ -20,6 +21,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1 import auth, permission_admin, performance, notifications
 from app.services.notification.worker import start_notification_worker, stop_notification_worker
+from app.services.notification.schedule import audit_registration as audit_notification_schedules
 from app.api.v1 import rules
 from app.services.business_rules.worker import start_rule_workers, stop_rule_workers
 from app.schemas.permission import AccessDenied, PermissionUnavailable
@@ -62,6 +64,8 @@ from app.services.knowledge.knowledge_index_service import (
 )
 
 from app.services.conversation_engine.feishu import init_feishu_client, close_feishu_client
+
+log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -126,6 +130,13 @@ async def lifespan(app: FastAPI):
         stack.push_async_callback(shutdown_hermes_agent)
         await init_hermes_agent(settings)
         stack.push_async_callback(feishu_gateway_webhook.close_model_runner)
+        if settings.notification_enabled:
+            try:
+                missing = await audit_notification_schedules()
+                if missing:
+                    log.error("notification_schedules_unregistered scenes=%s", missing)
+            except Exception:
+                log.exception("notification_schedule_audit_failed")
 
         await start_embedding_worker(settings)
         stack.push_async_callback(stop_embedding_worker)

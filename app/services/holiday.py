@@ -24,6 +24,7 @@ from app.schemas.holiday import NoticeInput, NoticeUpdate
 from app.security.auth import ACTIVE_STATUSES, MANAGEMENT_ROLES
 from app.services.attendance.leave_cards import card
 from app.services.notification.legacy import send_feishu_card
+from app.services.notification.recipients import valid_feishu_open_id
 from app.services.conversation_engine.session_store import SessionStore
 from app.services.holiday_cron import (
     HolidayError,
@@ -207,12 +208,14 @@ async def list_notices(
             statement = statement.where(HolidayNotice.title.contains(keyword,autoscape=True))
 
         rows = (
-            await db.scalars(statement.offset(offset).limit(limit+1))
+            await db.scalars(statement.order_by(HolidayNotice.id.desc())
+                             .offset(offset).limit(limit+1))
         ).all()
 
         return {
             "items": [notice_data(row) for row in rows[:limit]],
             "har_more": len(rows) > limit,
+            "has_more": len(rows) > limit,
             "offset": offset,
             "limit": limit
         }
@@ -319,9 +322,11 @@ async def update_notice(
         )
 
 
-def confirmation_card(identifier: str, body: NoticeInput) -> dict:
+def confirmation_card(identifier: str, body: NoticeInput,
+                      duty_names: dict[int, str] | None = None) -> dict:
+    duty_names = duty_names or {}
     duty_lines = [
-        f"{item.user_id}：{item.duty_date} {item.duty_time}"
+        f"{duty_names.get(item.user_id, '值班同事')}：{item.duty_date} {item.duty_time}"
         + (f"；{item.duty_notes}" if item.duty_notes else "")
         for item in body.duty_schedule
     ]
@@ -374,6 +379,13 @@ async def prepare_notice(
     async with create_session() as db:
         user = await actor(db, open_id, management=True) # 检查操作者权限，必须是超级管理员才可以操作
         await validate_duties(db, body) # 校验值班人员是否有效
+        duty_names = {}
+        if body.duty_schedule:
+            duty_names = dict((await db.execute(
+                select(User.user_id, User.name).where(
+                    User.user_id.in_({duty.user_id for duty in body.duty_schedule})
+                )
+            )).all())
 
     identifier = uuid4().hex
 
@@ -403,7 +415,7 @@ async def prepare_notice(
 
         await pipe.execute()
 
-    return confirmation_card(identifier, body) # 返回包含“确认创建”和“取消”按钮的飞书卡片字典。
+    return confirmation_card(identifier, body, duty_names)
 
 async def finish_notice_flow(user_id: int, flow_key: str):
     try:
@@ -454,7 +466,7 @@ async def confirm_notice_draft(
                 await finish_notice_flow(
                     user.user_id, draft["flow_key"],
                 )
-                return f"通知已创建，编号：{notice_id}"
+                return "通知已创建，将按计划推送。"
 
         current = await cache().get(
             preview_current_key(user.user_id)
@@ -473,7 +485,7 @@ async def confirm_notice_draft(
                 confirmation_key=key,
             )
             await cache().hset(key, "status", "SUBMITTED")
-            message = f"通知已创建，编号：{notice_id}，已安排定时推送"
+            message = "通知已创建，已安排定时推送"
 
         await finish_notice_flow(
             user.user_id, draft["flow_key"],
@@ -653,15 +665,15 @@ async def run_push(task: dict):
         targets = json.loads(targets_raw)
     else:
         async with create_session() as db:
-            targets = list(
-                (
-                    await db.scalars(
-                        select(User.user_id)
-                        .where(User.status.in_(ACTIVE_STATUSES))
-                        .order_by(User.user_id)
-                    )
-                ).all()
-            )
+            rows = (await db.execute(
+                select(User.user_id, User.feishu_open_id)
+                .where(User.status == "active")
+                .order_by(User.user_id)
+            )).all()
+            targets = [
+                user_id for user_id, open_id in rows
+                if valid_feishu_open_id(open_id)
+            ]
         await cache().hset(key, "targets", dump(targets))
 
     duties_by_user = {}
@@ -690,10 +702,14 @@ async def run_push(task: dict):
 
                 if exists is not None:
                     continue
-                if user is None or user.status not in ACTIVE_STATUSES:
+                if user is None or user.status != "active":
                     continue
-                if not user.feishu_open_id:
-                    raise HolidayError("接收人缺少飞书 Open ID")
+                if not valid_feishu_open_id(user.feishu_open_id):
+                    log.warning(
+                        "holiday_recipient_skipped notice_id=%s user_id=%s reason=invalid_open_id",
+                        notice_id, user_id,
+                    )
+                    continue
 
                 content = row.notice_content
                 duties = duties_by_user.get(user_id, [])
@@ -1493,7 +1509,7 @@ async def request_report(open_id: str, notice_id: int):
     await require_management(open_id)
     row = await load_notice(notice_id)
     root = await read_task(push_task_id(notice_id))
-    if row.status != "published" or root.get("status") != "COMPLETED":
+    if row.status != "published" or root is None or root.get("status") != "COMPLETED":
         raise HolidayError("通知尚未完成推送")
 
     reason = "manual:" + uuid4().hex

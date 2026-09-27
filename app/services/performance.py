@@ -239,6 +239,7 @@ class PerformanceService:
                     "cycle": cycle,
                     "grade_filter": grade,
                     "summary": score_stats([]),
+                    "distribution": [],
                     "members": [],
                     "anomalies": [],
                 }
@@ -265,6 +266,9 @@ class PerformanceService:
             "cycle": cycle,
             "grade_filter": grade,
             "summary": score_stats([
+                float(item["score"]) for item in members
+            ]),
+            "distribution": score_distribution([
                 float(item["score"]) for item in members
             ]),
             "members": members,

@@ -43,7 +43,7 @@ REQUISITION_TOOL_NAMES = (
     "submit_requisition",
     "query_requisition",
 )
-AGENT_MODEL = "qwen3.8-max-0902"
+AGENT_MODEL = "qwen3.7-flash"
 AGENT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 def _create_agent(settings: Settings) -> AIAgent:

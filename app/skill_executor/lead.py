@@ -71,8 +71,6 @@ class LeadFollowUpExecutor(BaseSkillExecutor):
             card=card(
                 "跟进已记录",
                 [markdown(
-                    f"线索编号：{lead_id}\n"
-                    f"跟进记录编号：{result['id']}\n"
                     f"下次跟进：{format_card_date(result['next_follow_up'], '未安排')}"
                 )],
                 "green",

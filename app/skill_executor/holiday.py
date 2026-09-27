@@ -7,6 +7,7 @@ from app.schemas.skill_result import SkillResult
 from app.services import holiday as service
 from app.services.conversation_engine.session_store import SessionStore
 from app.services.holiday_cron import HolidayError
+from app.services.holiday_cards import notice_list_card, notice_stats_card
 from app.skill_executor.base import BaseSkillExecutor
 
 
@@ -78,25 +79,19 @@ class HolidayQueryExecutor(BaseSkillExecutor):
                 result = await service.list_notices(context.open_id,keyword=slots.get("keyword"),limit=5)
                 if not result["items"]:
                     return SkillResult(False, "没有符合条件的通知")
-                notice_id = result["items"][0]["notice_id"] # 获取第一个通知的编号
+                return SkillResult(
+                    True, "请选择要查看的通知",
+                    card=notice_list_card(result["items"], result["has_more"],
+                                          keyword=slots.get("keyword")),
+                )
 
             notice = await service.detail(context.open_id, notice_id)
             stats = await service.receipt_stats(context.open_id, notice_id)
 
             return SkillResult(
                 True,
-                (
-                    f"通知：{notice['title']}\n"
-                    f"编号：{notice_id}\n"
-                    f"通知状态：{notice['status']}\n"
-                    f"推送状态：{notice['push_status']}\n"
-                    f"已确认：{stats['confirmed_count']} 人\n"
-                    f"未确认：{stats['unconfirmed_count']} 人\n"
-                    f"确认率：{stats['confirm_rate']}%"
-                ),
+                "通知回执统计已更新",
+                card=notice_stats_card(notice, stats),
             )
         except HolidayError as exc:
             return SkillResult(False, str(exc))
-
-
-

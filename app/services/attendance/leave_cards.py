@@ -57,6 +57,12 @@ def summary(data: dict) -> str:
 
 
 def confirmation_card(draft_id: str, data: dict) -> dict:
+    balance_text = ""
+    if data.get("remaining_days"):
+        balance_text = "\n可用余额：" + "、".join(
+            f"{year} 年 {days} 天"
+            for year, days in data["remaining_days"].items()
+        )
     return card(
         "请确认请假信息",
         [
@@ -64,12 +70,14 @@ def confirmation_card(draft_id: str, data: dict) -> dict:
                 summary(data)
                 + f"\n理由：{data['reason']}"
                 + f"\n审批人：{data['approver_name']}"
+                + balance_text
                 + "\n确认有效期：30分钟"
             ),
             {
                 "tag": "action",
                 "actions": [
                     button("确认提交", "confirm", draft_id),
+                    button("修改信息", "edit_draft", draft_id),
                     button("取消", "cancel_draft", draft_id),
                 ],
             },
@@ -77,11 +85,44 @@ def confirmation_card(draft_id: str, data: dict) -> dict:
     )
 
 
+def edit_draft_card(draft_id: str, data: dict) -> dict:
+    fields = [
+        {"tag": "select_static", "name": "leave_type",
+         "placeholder": {"tag": "plain_text", "content": "请选择假别"},
+         "initial_option": data["leave_type"],
+         "options": [
+             {"text": {"tag": "plain_text", "content": label}, "value": code}
+             for code, label in LEAVE_LABELS.items()
+         ]},
+    ]
+    for name, label in (("start_date", "开始日期（YYYY-MM-DD）"),
+                        ("end_date", "结束日期（YYYY-MM-DD）"),
+                        ("reason", "请假理由")):
+        fields.append({
+            "tag": "input", "name": name,
+            "label": {"tag": "plain_text", "content": label},
+            "default_value": str(data[name]), "required": True,
+        })
+    return {
+        "schema": "2.0", "config": {"width_mode": "fill"},
+        "header": {"title": {"tag": "plain_text", "content": "修改请假信息"}},
+        "body": {"elements": [{"tag": "form", "name": "leave_edit",
+            "elements": [*fields, {
+                "tag": "button", "name": "save_leave", "type": "primary",
+                "form_action_type": "submit",
+                "text": {"tag": "plain_text", "content": "保存并预览"},
+                "behaviors": [{"type": "callback", "value": {
+                    "module": "leave", "operation": "save_draft",
+                    "identifier": draft_id,
+                }}],
+            }]}]},
+    }
+
+
 def request_card(data: dict, *, can_approve: bool = False) -> dict:
     status = data["status"]
     text = (
-        f"申请编号：{data['request_id']}\n"
-        + summary(data)
+        summary(data)
         + f"\n状态：{STATUS_LABELS[status]}"
     )
 
@@ -108,3 +149,19 @@ def request_card(data: dict, *, can_approve: bool = False) -> dict:
         "cancelled": "grey",
     }.get(status, "blue")
     return card(f"请假申请 · {STATUS_LABELS[status]}", elements, color)
+
+
+def list_card(items: list[dict], *, inbox: bool, has_more: bool) -> dict:
+    elements = []
+    for item in items:
+        elements.append(text_block(
+            f"{LEAVE_LABELS[item['leave_type']]} · "
+            f"{item['start_date']} 至 {item['end_date']} · "
+            f"{STATUS_LABELS[item['status']]}"
+        ))
+        elements.append({"tag": "action", "actions": [
+            button("查看并处理", "detail", item["request_id"]),
+        ]})
+    if has_more:
+        elements.append(text_block("这里只展示最近的申请，可按日期描述要查询的记录。"))
+    return card("待我审批" if inbox else "我的请假", elements)

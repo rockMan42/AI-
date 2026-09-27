@@ -7,6 +7,8 @@ from tools.registry import registry
 from app.schemas.skill_context import SkillContext
 from app.schemas.skill_result import SkillResult
 from app.skill_executor.base import BaseSkillExecutor
+from app.services.attendance.feishu_card import attendance_filter_card
+from app.schemas.attendance import now_shanghai
 
 
 class AttendanceSKillExecutor(BaseSkillExecutor):
@@ -21,8 +23,12 @@ class AttendanceSKillExecutor(BaseSkillExecutor):
             and not slots.get("target_user_id")
         ):
             return SkillResult(
-                success=False,
-                message="查询其他员工时，请提供其系统用户 ID。",
+                success=True,
+                message="请在卡片中填写员工姓名，再选择月份或异常状态。",
+                card=attendance_filter_card(
+                    int(context.user_id), "选择员工",
+                    now_shanghai().strftime("%Y-%m"),
+                ),
             )
 
         target_id = slots.get("target_user_id") or context.user_id

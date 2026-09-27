@@ -8,6 +8,7 @@ from app.schemas.knowledge import KnowledgeSearchRequest
 
 from app.schemas.skill_context import SkillContext
 from app.security.auth import ACTIVE_STATUSES, accessible_permission_level
+from app.services.knowledge.cards import answer_card
 from app.skill_executor.base import BaseSkillExecutor, SkillResult
 
 
@@ -36,7 +37,8 @@ class PolicySkillExecutor(BaseSkillExecutor):
             return SkillResult(
                 success=True,
                 message=response.answer,
-                data=response.model_dump(mode="json")
+                data=response.model_dump(mode="json"),
+                card=answer_card(response),
             )
 
 

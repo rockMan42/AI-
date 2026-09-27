@@ -71,6 +71,22 @@ async def card_callback(request: Request):
 
         return await handle_lead_card_data(data)
 
+    if value.get("module") == "knowledge":
+        from app.api.v1.feishu_knowledge import handle_knowledge_card_data
+        return await handle_knowledge_card_data(data)
+
+    if value.get("module") == "attendance":
+        from app.api.v1.feishu_attendance import handle_attendance_card_data
+        return await handle_attendance_card_data(data)
+
+    if value.get("module") == "holiday":
+        from app.api.v1.feishu_holiday import handle_holiday_card_data
+        return await handle_holiday_card_data(data)
+
+    if value.get("module") == "performance":
+        from app.api.v1.feishu_performance import handle_performance_card_data
+        return await handle_performance_card_data(data)
+
     open_id = (event.get("operator") or {}).get("open_id", "")
     operation = value.get("action")
 

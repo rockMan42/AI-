@@ -16,6 +16,10 @@ def requisition_confirmation_card(draft: dict) -> dict:
         if draft.get(key):
             fields.append(f"**{label}**：{draft[key]}")
 
+    if draft.get("required_fields"):
+        fields.append("**本品类必填项**：" + "、".join(draft["required_fields"]))
+    fields.append("**审批安排**：提交后由 OA 按现有规则分配，并在状态卡片中展示进度")
+
     return {
         "config": {"wide_screen_mode": True},
         "header": {
@@ -48,6 +52,12 @@ def requisition_confirmation_card(draft: dict) -> dict:
                     },
                     {
                         "tag": "button",
+                        "text": {"tag": "plain_text", "content": "修改信息"},
+                        "value": {"module": "requisition", "operation": "edit",
+                                  "draft_id": draft["draft_id"]},
+                    },
+                    {
+                        "tag": "button",
                         "type": "danger",
                         "text": {
                             "tag": "plain_text",
@@ -62,6 +72,39 @@ def requisition_confirmation_card(draft: dict) -> dict:
                 ],
             },
         ],
+    }
+
+
+def requisition_edit_card(draft: dict) -> dict:
+    fields = []
+    for name, label, required in (
+        ("item_category", "品类", True),
+        ("item_name", "物资名称", True),
+        ("specification", "规格型号", False),
+        ("quantity", "数量", True),
+        ("reason", "申领原因", False),
+        ("purpose", "用途说明", False),
+        ("expected_return_date", "预计归还日期（YYYY-MM-DD）", False),
+    ):
+        fields.append({
+            "tag": "input", "name": name,
+            "label": {"tag": "plain_text", "content": label},
+            "default_value": str(draft.get(name) or ""),
+            "required": required,
+        })
+    return {
+        "schema": "2.0", "config": {"width_mode": "fill"},
+        "header": {"title": {"tag": "plain_text", "content": "修改物资申领"}},
+        "body": {"elements": [{"tag": "form", "name": "requisition_edit",
+            "elements": [*fields, {
+                "tag": "button", "name": "save_requisition", "type": "primary",
+                "form_action_type": "submit",
+                "text": {"tag": "plain_text", "content": "保存并预览"},
+                "behaviors": [{"type": "callback", "value": {
+                    "module": "requisition", "operation": "save",
+                    "draft_id": draft["draft_id"],
+                }}],
+            }]}]},
     }
 
 

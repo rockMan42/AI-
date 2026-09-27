@@ -73,6 +73,7 @@ async def submit_requisition(
     item_name: str,
     quantity: int,
     client_request_id: str,
+    identity_token: str,
     ctx: Context,
     specification: str | None = None,
     reason: str | None = None,
@@ -82,7 +83,7 @@ async def submit_requisition(
     """本地模式直接创建申领单；HTTP 模式调用真实 OA。"""
 
     await authorize_requisition(
-        ctx.identity_token,
+        identity_token,
         "submit_requisition",
         applicant_id=applicant_id,
     )
@@ -195,12 +196,13 @@ async def submit_requisition(
 @mcp_server.tool(name="query_requisition")
 async def query_requisition(
     requisition_id: int,
+    identity_token: str,
     ctx: Context,
 ) -> dict:
     """本地模式查询数据库；HTTP 模式查询真实 OA。"""
 
     await authorize_requisition(
-        ctx.identity_token,
+        identity_token,
         "query_requisition",
         resource_id=requisition_id,
     )

@@ -22,7 +22,7 @@ mcp_servers:
       - "-m"
       - "app.hermes.mcp.requisition_mcp_server"
     connect_timeout: 30
-    timeout: 15
+    timeout: 45
     tools:
       include:
         - list_categories

@@ -1,7 +1,7 @@
 import logging
 import re
 
-from app.services.attendance.leave_cards import request_card
+from app.services.attendance.leave_cards import list_card, request_card
 from app.services.attendance.leave_service import LeaveService
 from app.schemas.leave import ApprovalInput
 from app.services.conversation_engine.session_store import SessionStore
@@ -48,15 +48,8 @@ async def handle_leave_command(open_id: str, text: str):
         if not result["items"]:
             return "暂无符合条件的请假申请。"
 
-        lines = [
-            f"{item['request_id']} | {item['start_date']}至"
-            f"{item['end_date']} | {item['status']}"
-            for item in result["items"]
-        ]
-        lines.append("查看详情：查询请假 申请编号")
-        if result["has_more"]:
-            lines.append("这里只展示最近20条，更多记录可通过列表接口分页查询。")
-        return "\n".join(lines)
+        return list_card(result["items"], inbox=text == "待我审批",
+                         has_more=result["has_more"])
 
     match = re.fullmatch(rf"查询请假\s+({REQUEST_ID})", text)
     if match:
@@ -76,10 +69,5 @@ async def handle_leave_command(open_id: str, text: str):
 
     # 命令格式错误不再进入模型，避免误路由成另一笔请假。
     if text.startswith(("查询请假", "撤销请假", "拒绝请假")):
-        return (
-            "请使用以下格式：\n"
-            "查询请假 申请编号\n"
-            "撤销请假 申请编号\n"
-            "拒绝请假 申请编号 拒绝原因"
-        )
+        return "请在最近的请假卡片中查看、撤销或审批申请；也可以发送“我的请假”或“待我审批”。"
     return None

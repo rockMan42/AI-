@@ -59,7 +59,7 @@ class IntentRouter:
                     "message":self._build_fallback_messages()
                 }
 
-            display_name = skill.display_name or skill.description
+            display_name = skill.display_name or "办理这项业务"
             return {
                 "action":"confirm_intent",
                 "suggested_intent":intent,
@@ -75,11 +75,10 @@ class IntentRouter:
 
 
     def _build_fallback_messages(self) -> str:
-        skills = self.register.get_all_skills()
-        skill_list= "\n".join(
-            f"- {s.display_name or s.description}"
-            for s in skills.values()
+        return (
+            "我还没确定您要办理什么。可以试试：\n"
+            "查本月考勤\n"
+            "我要请假\n"
+            "查询报销进度\n"
+            "也可以直接描述您要办理的事情。"
         )
-        return ("抱歉，我没能理解您的意思，你可以试试以下操作:\n" +
-                f"{skill_list}\n" +
-                "请你用简单的话描述你想做的事情")

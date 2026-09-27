@@ -353,6 +353,25 @@ class LeadService:
         if next_time is not None and next_time <= now:
             raise LeadError("下次跟进时间必须晚于当前时间", 422)
 
+        # 同一线索的行锁串行化并发点击；相同内容在短时间内只保留一条记录。
+        recent = await db.scalar(
+            select(LeadFollowUp)
+            .where(
+                LeadFollowUp.lead_id == lead.id,
+                LeadFollowUp.user_id == actor.user_id,
+                LeadFollowUp.created_at >= now - timedelta(seconds=30),
+            )
+            .order_by(LeadFollowUp.created_at.desc(), LeadFollowUp.id.desc())
+            .limit(1)
+        )
+        if (recent is not None
+                and recent.follow_up_type == body.follow_up_type
+                and recent.content == body.content
+                and recent.outcome == body.outcome
+                and recent.next_action == body.next_action
+                and recent.next_follow_up == next_time):
+            return row_data(recent)
+
         record = LeadFollowUp(
             lead_id=lead.id,
             user_id=actor.user_id,
@@ -371,7 +390,6 @@ class LeadService:
         result = row_data(record)
         await db.commit()
         return result
-
 
 
 

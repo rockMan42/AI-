@@ -295,8 +295,15 @@ def check_facts(rules: list[dict], facts: dict, today: date) -> list[dict]:
 
     missing = mandatory - fields
     if missing:
+        labels = {
+            "buyer_name": "购买方名称",
+            "buyer_tax_id": "购买方税号",
+            "invoice_date": "开票日期",
+        }
         raise ExpenseError(
-            "缺少有效的基础校验规则：" + "、".join(sorted(missing)),
+            "报销规则尚未配置："
+            + "、".join(labels[field] for field in sorted(missing))
+            + "，请联系管理员补齐后重试",
             409,
         )
 

@@ -9,13 +9,17 @@ from sqlalchemy import select
 from app.config.settings import get_settings
 from app.core.database import create_session
 from app.models.user import User
-from app.schemas.leave import ApprovalInput
+from app.schemas.leave import ApprovalInput, LeaveInput
 from app.security.auth import ACTIVE_STATUSES
 from app.security.feishu_event import decode_feishu_event
 from app.services.attendance.leave_chat import finish_leave_flow
-from app.services.attendance.leave_cards import card as leave_card, reject_form_card, request_card
+from app.services.attendance.leave_cards import (
+    card as leave_card, confirmation_card, edit_draft_card,
+    reject_form_card, request_card,
+)
 from app.services.attendance.leave_service import LeaveError, LeaveService
 from app.services.attendance.feishu_card import text_block
+from app.services.card_form import parse_form_values
 
 
 log = logging.getLogger(__name__)
@@ -61,7 +65,7 @@ async def handle_leave_card_data(data: dict):
 
     pattern = (
         r"[a-f0-9]{32}"
-        if operation in {"confirm", "cancel_draft"}
+        if operation in {"confirm", "cancel_draft", "edit_draft", "save_draft"}
         else r"LV[0-9A-F]{32}"
     )
     if re.fullmatch(pattern, identifier) is None:
@@ -77,8 +81,28 @@ async def handle_leave_card_data(data: dict):
 
             if operation == "confirm":
                 result = await service.submit(open_id, identifier)
-                message = f"已提交：{result['request_id']}"
+                message = "请假申请已提交"
                 updated_card = request_card(result)
+            elif operation == "edit_draft":
+                draft = await service.draft_detail(open_id, identifier)
+                message = "请修改后预览"
+                updated_card = edit_draft_card(identifier, draft)
+            elif operation == "save_draft":
+                draft = await service.draft_detail(open_id, identifier)
+                expected = {"leave_type", "start_date", "end_date", "reason"}
+                try:
+                    fields = parse_form_values(
+                        (event.get("action") or {}).get("form_value") or {}, expected,
+                    )
+                except ValueError:
+                    raise LeaveError("修改卡片已失效，请重新打开", 409) from None
+                merged = {name: fields.get(name, draft[name]) for name in expected}
+                new_draft = await service.prepare(
+                    open_id, LeaveInput.model_validate(merged),
+                    flow_key=draft["flow_key"],
+                )
+                message = "已更新，请核对后确认提交"
+                updated_card = confirmation_card(new_draft["draft_id"], new_draft)
             elif operation == "cancel_draft":
                 result = await service.cancel_draft(open_id, identifier)
                 message = "已取消本次填写"
@@ -105,6 +129,10 @@ async def handle_leave_card_data(data: dict):
                 result = await service.cancel(open_id, identifier)
                 message = "申请已撤销"
                 updated_card = request_card(result)
+            elif operation == "detail":
+                detail = await service.detail(open_id, identifier)
+                message = "已打开申请详情"
+                updated_card = request_card(detail, can_approve=detail["can_approve"])
             elif operation == "reject_hint":
                 detail = await service.detail(open_id, identifier)
                 if not detail["can_approve"]:

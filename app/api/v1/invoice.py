@@ -5,13 +5,14 @@ from pydantic import ValidationError
 
 from app.api.v1.feishu_leave import callback_actor
 from app.models import User
-from app.schemas.invoice import InvoiceOCRInput, InvoiceConfirmInput
+from app.schemas.invoice import FIELD_LABELS, InvoiceOCRInput, InvoiceConfirmInput
 from app.security.auth import get_current_user
 from app.services.expense.cards import invoice_card
 from app.services.expense.chat import finish_flow, refresh_summary
 from starlette.background import BackgroundTask
 from starlette.responses import JSONResponse
 from app.services.expense.invoice_service import InvoiceError
+from app.services.card_form import parse_form_values
 from fastapi import (
     APIRouter,
     Depends,
@@ -133,6 +134,35 @@ async def handle_invoice_card_data(data: dict, service):
                     actor.user_id,
                     body.request_id,
                 )
+            elif operation == "save_changes":
+                try:
+                    fields = parse_form_values(
+                        (event.get("action") or {}).get("form_value") or {},
+                        set(FIELD_LABELS),
+                    )
+                except ValueError:
+                    raise InvoiceError("编辑卡片已失效，请重新打开发票修改卡片", 409) from None
+                current = await service.detail(actor.user_id, body.request_id)
+                original = next(
+                    (row for row in current["results"] if row["index"] == body.index),
+                    None,
+                )
+                if original is None:
+                    raise InvoiceError("这张发票已无法查看，请重新上传", 404)
+                corrections = {}
+                for name, raw in fields.items():
+                    value_text = raw.strip()
+                    previous = original.get(name)
+                    if value_text != ("" if previous is None else str(previous)):
+                        corrections[name] = None if value_text == "不适用" else value_text
+                batch = await service.confirm(
+                    actor.user_id,
+                    InvoiceConfirmInput(
+                        request_id=body.request_id,
+                        index=body.index,
+                        corrections=corrections,
+                    ),
+                )
             elif operation == "confirm":
                 batch = await service.confirm(
                     actor.user_id,
@@ -159,7 +189,7 @@ async def handle_invoice_card_data(data: dict, service):
             if operation == "modify" and item["verified"]:
                 raise InvoiceError("发票已经确认")
 
-        if operation == "confirm":
+        if operation in {"confirm", "save_changes"}:
             await finish_flow(actor.user_id, batch)
 
         result = {
@@ -167,8 +197,8 @@ async def handle_invoice_card_data(data: dict, service):
                 "type": "success",
                 "content": (
                     "已确认"
-                    if operation == "confirm"
-                    else "请按卡片提示修改"
+                    if operation in {"confirm", "save_changes"}
+                    else "请在卡片中修改"
                 ),
             },
             "card": {
@@ -180,7 +210,7 @@ async def handle_invoice_card_data(data: dict, service):
                 ),
             },
         }
-        if operation == "confirm":
+        if operation in {"confirm", "save_changes"}:
             return JSONResponse(
                 result,
                 background=BackgroundTask(
