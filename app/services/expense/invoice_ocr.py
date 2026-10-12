@@ -1,12 +1,15 @@
 import asyncio
 import json
+import logging
 import math
+import time
 from datetime import date
 
 import httpx
 from app.schemas.invoice import InvoiceFields, InvoiceOCRResult
 
-OCR_TIMEOUT_SECONDS = 30
+OCR_TIMEOUT_SECONDS = 60
+log = logging.getLogger(__name__)
 
 AMOUNT_FIELDS = {
     "total_amount",
@@ -167,14 +170,49 @@ class InvoiceOCRService:
 
     async def recognize(self, image_source: str) -> InvoiceOCRResult:
         # 图片来源必须先经过业务层鉴权。
+        started = time.monotonic()
         try:
             async with self._semaphore:
                 async with asyncio.timeout(OCR_TIMEOUT_SECONDS):
                     text = await self._call(image_source)
 
-        except (TimeoutError, httpx.TimeoutException):
+        except (TimeoutError, httpx.TimeoutException) as exc:
+            log.warning(
+                "invoice_ocr_timeout model=%s elapsed_ms=%.2f error_type=%s",
+                self._model,
+                (time.monotonic() - started) * 1000,
+                type(exc).__name__,
+            )
             return failed_result("发票识别超时，请重试")
-        except httpx.HTTPError:
+        except httpx.HTTPStatusError as exc:
+            error_code = "unknown"
+            error_message = ""
+            try:
+                payload = exc.response.json()
+                if isinstance(payload, dict):
+                    error_code = str(payload.get("code") or error_code)
+                    error_message = str(payload.get("message") or "")
+            except ValueError:
+                pass
+            if "data:image/" in error_message or "sk-" in error_message:
+                error_message = "[redacted]"
+            else:
+                error_message = error_message.replace("\r", " ").replace("\n", " ")[:200]
+            log.warning(
+                "invoice_ocr_upstream_status status=%s code=%s message=%s request_id=%s",
+                exc.response.status_code,
+                error_code,
+                error_message,
+                exc.response.headers.get("x-request-id", ""),
+            )
+            if error_code == "AllocationQuota.FreeTierOnly":
+                return failed_result("发票识别免费额度已用尽，请联系管理员处理")
+            return failed_result("发票识别服务暂不可用，请重试")
+        except httpx.HTTPError as exc:
+            log.warning(
+                "invoice_ocr_request_failed error_type=%s",
+                type(exc).__name__,
+            )
             return failed_result("发票识别服务暂不可用，请重试")
         except (ValueError, KeyError, IndexError, TypeError):
             return failed_result(
@@ -192,26 +230,31 @@ class InvoiceOCRService:
         )
 
     async def _call(self, image_source: str) -> str:
+        if self._model == "qwen3.5-ocr":
+            messages = [{
+                "role": "user",
+                "content": [
+                    {"image": image_source},
+                    {"text": INVOICE_OCR_PROMPT},
+                ],
+            }]
+        else:
+            messages = [
+                {
+                    "role": "system",
+                    "content": [{"text": INVOICE_OCR_PROMPT}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"image": image_source}],
+                },
+            ]
+
         response = await self._client.post(
             self._api_url,
             json={
                 "model": self._model,
-                "input": {
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": [
-                                {"text": INVOICE_OCR_PROMPT}
-                            ],
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {"image": image_source}
-                            ],
-                        },
-                    ],
-                },
+                "input": {"messages": messages},
                 "parameters": {
                     "result_format": "message",
                 },
@@ -229,18 +272,19 @@ class InvoiceOCRService:
             raise ValueError("模型输出未完整结束")
 
         content = choice["message"]["content"]
-        if not isinstance(content, list):
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            text = "".join(
+                part["text"]
+                for part in content
+                if isinstance(part, dict)
+                and isinstance(part.get("text"), str)
+            )
+        else:
             raise ValueError("模型响应内容格式错误")
-
-        text = "".join(
-            part["text"]
-            for part in content
-            if isinstance(part, dict)
-            and isinstance(part.get("text"), str)
-        )
 
         if not text.strip():
             raise ValueError("模型返回空内容")
 
         return text
-

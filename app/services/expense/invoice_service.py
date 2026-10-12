@@ -37,7 +37,7 @@ class InvoiceError(ValueError):
 async def request_lock(request_id: str):
     lock = redis_module.redis_client.lock(
         f"dep:lock:ocr:{request_id}",
-        timeout=180,
+        timeout=330,
         blocking_timeout=0.2,
     )
 
@@ -45,7 +45,7 @@ async def request_lock(request_id: str):
         raise InvoiceError("本批发票正在处理, 请稍后重试")
 
     try:
-        async with asyncio.timeout(150):
+        async with asyncio.timeout(300):
             yield
     finally:
         if await lock.owned():
@@ -308,17 +308,19 @@ class InvoiceService:
                 else:
                     payload.update(corrections)
 
-                    if not all(
-                            payload.get(name) is not None
-                            for name in (
-                                    "invoice_type",
-                                    "invoice_number",
-                                    "invoice_date",
-                                    "total_amount",
-                            )
-                    ):
+                    missing = [
+                        FIELD_LABELS[name]
+                        for name in (
+                            "invoice_type",
+                            "invoice_number",
+                            "invoice_date",
+                            "total_amount",
+                        )
+                        if payload.get(name) is None
+                    ]
+                    if missing:
                         raise InvoiceError(
-                            "请补全发票类型、号码、开票日期和价税合计后再确认",
+                            f"请补全{'、'.join(missing)}后再确认",
                             422,
                         )
 
@@ -402,5 +404,3 @@ class InvoiceService:
         }[suffix]
 
         return data, mime
-
-

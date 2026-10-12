@@ -183,7 +183,7 @@ class Settings(BaseSettings):
 
 
     # 发票 OCR
-    invoice_ocr_model: str = "qwen-vl-max"
+    invoice_ocr_model: str = "qwen3.8-max"
     invoice_ocr_api_url: str = (
         "https://dashscope.aliyuncs.com/api/v1/services/"
         "aigc/multimodal-generation/generation"

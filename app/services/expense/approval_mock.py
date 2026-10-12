@@ -13,7 +13,6 @@ from app.services.expense.approval_state import (
     POLL_STATUSES,
     REJECTED_STATUSES,
     ensure_transition,
-    parse_finance_time,
 )
 from app.services.expense.rules import ExpenseError
 from app.utils.time import as_utc, utc_now
@@ -114,17 +113,9 @@ async def advance_mock(admin_id, expense_id, body: MockApprovalInput):
         paid_amount = None
 
         if body.to_status == "paid":
-            if body.paid_amount is None or body.paid_at is None:
-                raise ExpenseError("打款必须提供金额和实际时间", 422)
-            try:
-                parsed_paid_at = parse_finance_time(body.paid_at)
-                submitted_at = parse_finance_time(state["submitted_at"])
-            except ValueError:
-                raise ExpenseError("打款时间格式无效", 422) from None
-
-            if not submitted_at <= parsed_paid_at <= now:
-                raise ExpenseError("打款时间不在有效范围内", 422)
-            paid_at = as_utc(parsed_paid_at).isoformat()
+            if body.paid_amount is None:
+                raise ExpenseError("打款必须提供金额", 422)
+            paid_at = as_utc(now).isoformat()
             paid_amount = str(body.paid_amount)
         elif body.paid_at is not None or body.paid_amount is not None:
             raise ExpenseError("非打款事件不能填写打款信息", 422)
